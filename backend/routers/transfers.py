@@ -225,4 +225,3 @@ async def cancel_transfer_request(
     db.delete(request)
     db.commit()
     return {"message": "申请已撤回"}
-

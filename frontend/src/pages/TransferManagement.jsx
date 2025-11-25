@@ -1,19 +1,24 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col } from 'antd'
-import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag } from 'antd'
+import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useTransfer } from '../contexts/TransferContext'
 
 const { Option } = Select
 
 const TransferManagement = () => {
   const { user: currentUser } = useAuth()
+  const { refreshPendingConfirmations, refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
   const [assets, setAssets] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false)
+  const [currentTransfer, setCurrentTransfer] = useState(null)
   const [form] = Form.useForm()
+  const [confirmForm] = Form.useForm()
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
 
@@ -93,6 +98,8 @@ const TransferManagement = () => {
       message.success('交接申请已提交')
       setModalVisible(false)
       fetchTransfers()
+      // 刷新侧边栏的待确认数量（如果当前用户是转入人）
+      refreshPendingConfirmations()
     } catch (error) {
       message.error(error.response?.data?.detail || '提交失败')
     }
@@ -103,19 +110,70 @@ const TransferManagement = () => {
       await api.delete(`/transfers/${requestId}`)
       message.success('申请已撤回')
       fetchTransfers()
+      // 刷新侧边栏的待确认数量
+      refreshPendingConfirmations()
     } catch (error) {
       message.error(error.response?.data?.detail || '撤回失败')
     }
   }
 
+  const handleConfirm = (record) => {
+    setCurrentTransfer(record)
+    confirmForm.resetFields()
+    setConfirmModalVisible(true)
+  }
+
+  const handleConfirmSubmit = async (values) => {
+    try {
+      const confirmed = values.action === 'confirm'
+      await api.post(`/transfers/${currentTransfer.id}/confirm`, {
+        confirmed,
+        comment: values.comment
+      })
+      message.success(confirmed ? '已确认交接申请' : '已拒绝交接申请')
+      setConfirmModalVisible(false)
+      setCurrentTransfer(null)
+      fetchTransfers()
+      // 刷新侧边栏的待确认数量
+      refreshPendingConfirmations()
+      // 如果确认了，也会影响待审批数量（转入人确认后进入待审批状态）
+      if (confirmed) {
+        refreshPendingApprovals()
+      }
+    } catch (error) {
+      message.error(error.response?.data?.detail || '操作失败')
+    }
+  }
+
   const getStatusTag = (status) => {
     const statusMap = {
-      pending: { color: 'orange', text: '待审批' },
-      approved: { color: 'green', text: '已批准' },
-      rejected: { color: 'red', text: '已拒绝' }
+      waiting_confirmation: { color: '#1677ff', text: '待转入人确认', icon: '⏳' },
+      pending: { color: '#faad14', text: '待审批', icon: '⏰' },
+      approved: { color: '#52c41a', text: '已批准', icon: '✓' },
+      rejected: { color: '#722ed1', text: '已拒绝', icon: '✗' },
+      confirmation_rejected: { color: '#ff4d4f', text: '转入人已拒绝', icon: '✗' }
     }
-    const statusInfo = statusMap[status] || { color: 'default', text: status }
-    return <span style={{ color: statusInfo.color }}>{statusInfo.text}</span>
+    const statusInfo = statusMap[status] || { color: '#d9d9d9', text: status || '未知', icon: '' }
+
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: 160 }}>
+        <Tag
+          color={statusInfo.color}
+          style={{
+            marginBottom: 4,
+            whiteSpace: 'normal',
+            wordBreak: 'break-word',
+            padding: '2px 8px',
+            lineHeight: 1.4
+          }}
+        >
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+            {statusInfo.icon && <span>{statusInfo.icon}</span>}
+            <span>{statusInfo.text}</span>
+          </span>
+        </Tag>
+      </div>
+    )
   }
 
   const columns = [
@@ -149,7 +207,56 @@ const TransferManagement = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 180,
       render: getStatusTag
+    },
+    {
+      title: '转入人意见',
+      key: 'to_user_confirm',
+      width: 200,
+      render: (_, record) => {
+        // 待确认
+        if (record.to_user_confirmed === null || record.to_user_confirmed === undefined) {
+          return <Tag color="default">待确认</Tag>
+        }
+        // 已确认
+        if (record.to_user_confirmed === 1) {
+          return (
+            <div>
+              <Tag color="success" style={{ marginBottom: 4 }}>✓ 已确认</Tag>
+              {record.to_user_confirm_comment && (
+                <div style={{ color: '#666', fontSize: '12px', marginTop: 4, wordBreak: 'break-word' }}>
+                  {record.to_user_confirm_comment}
+                </div>
+              )}
+              {record.to_user_confirmed_at && (
+                <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
+                  {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
+                </div>
+              )}
+            </div>
+          )
+        }
+        // 已拒绝
+        if (record.to_user_confirmed === 0) {
+          return (
+            <div>
+              <Tag color="error" style={{ marginBottom: 4 }}>✗ 已拒绝</Tag>
+              {record.to_user_confirm_comment && (
+                <div style={{ color: '#666', fontSize: '12px', marginTop: 4, wordBreak: 'break-word' }}>
+                  {record.to_user_confirm_comment}
+                </div>
+              )}
+              {record.to_user_confirmed_at && (
+                <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
+                  {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
+                </div>
+              )}
+            </div>
+          )
+        }
+        return '-'
+      }
     },
     {
       title: '审批意见',
@@ -168,12 +275,29 @@ const TransferManagement = () => {
       title: '操作',
       key: 'action',
       render: (_, record) => {
-        // 只有转出用户可以对pending状态的申请进行撤回
-        const canCancel = record.status === 'pending' && 
-                         (currentUser?.role === 'admin' || record.from_user_id === currentUser?.id)
+        const isToUser = record.to_user_id === currentUser?.id
+        const isFromUser = record.from_user_id === currentUser?.id
+        const isAdmin = currentUser?.role === 'admin'
+        
+        // 转入人可以确认或拒绝待确认的申请
+        const canConfirm = isToUser && record.status === 'waiting_confirmation'
+        
+        // 转出用户或管理员可以撤回待确认或待审批的申请
+        const canCancel = (isFromUser || isAdmin) && 
+                         (record.status === 'waiting_confirmation' || record.status === 'pending')
         
         return (
           <Space>
+            {canConfirm && (
+              <Button 
+                type="link" 
+                icon={<CheckCircleOutlined />}
+                size="small"
+                onClick={() => handleConfirm(record)}
+              >
+                确认
+              </Button>
+            )}
             {canCancel && (
               <Popconfirm
                 title="确定要撤回此申请吗？"
@@ -221,10 +345,12 @@ const TransferManagement = () => {
           />
         </Form.Item>
         <Form.Item label="状态" name="status">
-          <Select placeholder="全部" style={{ width: 120 }} allowClear>
+          <Select placeholder="全部" style={{ width: 150 }} allowClear>
+            <Option value="waiting_confirmation">待转入人确认</Option>
             <Option value="pending">待审批</Option>
             <Option value="approved">已批准</Option>
             <Option value="rejected">已拒绝</Option>
+            <Option value="confirmation_rejected">转入人已拒绝</Option>
           </Select>
         </Form.Item>
         <Form.Item>
@@ -291,11 +417,66 @@ const TransferManagement = () => {
           >
             <Input.TextArea rows={4} />
           </Form.Item>
-        </Form>
-      </Modal>
-    </div>
-  )
-}
+          </Form>
+        </Modal>
 
-export default TransferManagement
+        {/* 转入人确认弹窗 */}
+        <Modal
+          title="确认资产交接"
+          open={confirmModalVisible}
+          onCancel={() => {
+            setConfirmModalVisible(false)
+            setCurrentTransfer(null)
+          }}
+          footer={null}
+        >
+          {currentTransfer && (
+            <div style={{ marginBottom: 16 }}>
+              <p><strong>资产编号：</strong>{currentTransfer.asset?.asset_number}</p>
+              <p><strong>资产名称：</strong>{currentTransfer.asset?.name}</p>
+              <p><strong>转出人：</strong>{currentTransfer.from_user?.real_name}</p>
+              <p><strong>交接原因：</strong>{currentTransfer.reason || '无'}</p>
+            </div>
+          )}
+          <Form
+            form={confirmForm}
+            layout="vertical"
+            onFinish={handleConfirmSubmit}
+          >
+            <Form.Item
+              label="操作"
+              name="action"
+              rules={[{ required: true, message: '请选择操作' }]}
+            >
+              <Select>
+                <Option value="confirm">确认接收</Option>
+                <Option value="reject">拒绝接收</Option>
+              </Select>
+            </Form.Item>
+            <Form.Item
+              label="备注"
+              name="comment"
+            >
+              <Input.TextArea rows={4} placeholder="请输入确认备注（可选）" />
+            </Form.Item>
+            <Form.Item>
+              <Space>
+                <Button onClick={() => {
+                  setConfirmModalVisible(false)
+                  setCurrentTransfer(null)
+                }}>
+                  取消
+                </Button>
+                <Button type="primary" htmlType="submit">
+                  提交
+                </Button>
+              </Space>
+            </Form.Item>
+          </Form>
+        </Modal>
+      </div>
+    )
+  }
+  
+  export default TransferManagement
 

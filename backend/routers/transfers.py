@@ -7,9 +7,10 @@ from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
 from models import TransferRequest, Asset, User
-from schemas import TransferRequestCreate, TransferRequestResponse
+from schemas import TransferRequestCreate, TransferRequestResponse, TransferConfirmationRequest
 from auth import get_current_user
 from logger import logger
+from datetime import datetime
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -144,14 +145,14 @@ async def create_transfer_request(
     if current_user.role != "admin" and asset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
     
-    # 创建交接申请
+    # 创建交接申请，初始状态为待转入人确认
     db_request = TransferRequest(
         asset_id=transfer_data.asset_id,
         from_user_id=from_user_id,
         to_user_id=transfer_data.to_user_id,
         created_by_id=current_user.id,  # 记录实际创建申请的用户
         reason=transfer_data.reason,
-        status="pending"
+        status="waiting_confirmation"  # 初始状态：待转入人确认
     )
     db.add(db_request)
     db.flush()  # 先flush获取ID
@@ -190,14 +191,14 @@ async def cancel_transfer_request(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """撤回资产交接申请（仅转出用户可以撤回,且只能撤回待审批状态的申请）"""
+    """撤回资产交接申请（仅转出用户可以撤回,且只能撤回待确认或待审批状态的申请）"""
     request = db.query(TransferRequest).filter(TransferRequest.id == request_id).first()
     if not request:
         raise HTTPException(status_code=404, detail="交接申请不存在")
     
-    # 检查申请状态,只能撤回待审批的申请
-    if request.status != "pending":
-        raise HTTPException(status_code=400, detail="只能撤回待审批状态的申请")
+    # 检查申请状态,只能撤回待确认或待审批的申请
+    if request.status not in ["waiting_confirmation", "pending"]:
+        raise HTTPException(status_code=400, detail="只能撤回待确认或待审批状态的申请")
     
     # 检查权限：只有创建申请的用户可以撤回（管理员也可以）
     # 如果是管理员代为申请,created_by_id 是管理员；否则是转出用户
@@ -231,3 +232,64 @@ async def cancel_transfer_request(
     db.delete(request)
     db.commit()
     return {"message": "申请已撤回"}
+
+
+@router.post("/{request_id}/confirm", response_model=TransferRequestResponse)
+async def confirm_transfer_request(
+    request_id: int,
+    confirmation_data: TransferConfirmationRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """转入人确认或拒绝交接申请"""
+    request = db.query(TransferRequest).filter(TransferRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="交接申请不存在")
+    
+    # 检查权限：只有转入人可以确认
+    if request.to_user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只有转入人可以确认此申请")
+    
+    # 检查申请状态，只能确认待确认状态的申请
+    if request.status != "waiting_confirmation":
+        raise HTTPException(status_code=400, detail="只能确认待确认状态的申请")
+    
+    # 更新确认信息
+    request.to_user_confirmed = 1 if confirmation_data.confirmed else 0
+    request.to_user_confirm_comment = confirmation_data.comment
+    request.to_user_confirmed_at = datetime.utcnow()
+    
+    if confirmation_data.confirmed:
+        # 转入人确认，状态改为待审批
+        request.status = "pending"
+        action_description = f"转入人确认资产交接申请"
+        logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 确认资产交接申请: 申请ID {request.id}")
+    else:
+        # 转入人拒绝，状态改为确认拒绝
+        request.status = "confirmation_rejected"
+        action_description = f"转入人拒绝资产交接申请"
+        logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 拒绝资产交接申请: 申请ID {request.id}")
+    
+    # 记录确认历史
+    try:
+        create_history = get_create_history_record()
+        from_user = db.query(User).filter(User.id == request.from_user_id).first()
+        to_user = db.query(User).filter(User.id == request.to_user_id).first()
+        
+        create_history(
+            db=db,
+            asset_id=request.asset_id,
+            action_type="transfer",
+            action_description=action_description,
+            operator_id=current_user.id,
+            old_value={"user_id": request.from_user_id, "user_name": from_user.real_name if from_user else ""},
+            new_value={"user_id": request.to_user_id, "user_name": to_user.real_name if to_user else ""},
+            related_request_id=request.id,
+            related_request_type="transfer"
+        )
+    except Exception as e:
+        logger.error(f"记录确认历史失败: {e}", exc_info=True)
+    
+    db.commit()
+    db.refresh(request)
+    return TransferRequestResponse.model_validate(request)

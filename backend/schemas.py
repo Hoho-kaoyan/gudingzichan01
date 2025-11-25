@@ -140,6 +140,12 @@ class TransferRequestCreate(BaseModel):
     reason: Optional[str] = Field(None, description="交接原因")
 
 
+class TransferConfirmationRequest(BaseModel):
+    """转入人确认请求"""
+    confirmed: bool = Field(..., description="是否确认：true-确认，false-拒绝")
+    comment: Optional[str] = Field(None, description="确认备注")
+
+
 class TransferRequestResponse(BaseModel):
     id: int
     asset_id: int
@@ -150,6 +156,9 @@ class TransferRequestResponse(BaseModel):
     status: str
     approver_id: Optional[int] = None
     approval_comment: Optional[str] = None
+    to_user_confirmed: Optional[int] = None
+    to_user_confirm_comment: Optional[str] = None
+    to_user_confirmed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None

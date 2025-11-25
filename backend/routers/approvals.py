@@ -36,8 +36,13 @@ async def approve_request(
         if not request:
             raise HTTPException(status_code=404, detail="交接申请不存在")
         
+        # 检查申请状态，必须是待审批状态
         if request.status != "pending":
-            raise HTTPException(status_code=400, detail="该申请已处理")
+            raise HTTPException(status_code=400, detail="该申请已处理或尚未确认")
+        
+        # 检查转入人是否已确认
+        if request.to_user_confirmed is None or request.to_user_confirmed != 1:
+            raise HTTPException(status_code=400, detail="转入人尚未确认，无法审批")
         
         # 更新申请状态
         request.status = "approved" if approval_data.approved else "rejected"

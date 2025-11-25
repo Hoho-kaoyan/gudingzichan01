@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout as AntLayout, Menu, Avatar, Dropdown, Space } from 'antd'
+import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge } from 'antd'
 import {
   DashboardOutlined,
   UserOutlined,
@@ -13,6 +13,7 @@ import {
   MenuUnfoldOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
+import { useTransfer } from '../contexts/TransferContext'
 
 const { Header, Sider, Content } = AntLayout
 
@@ -25,6 +26,27 @@ const Layout = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout, isAdmin } = useAuth()
+  const { pendingTransferConfirmCount, pendingApprovalCount } = useTransfer()
+
+  const renderTransferLabel = () => {
+    if (pendingTransferConfirmCount > 0) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          资产交接
+          <Badge
+            count={pendingTransferConfirmCount}
+            size="small"
+            color="#fa8c16"
+            style={{
+              backgroundColor: '#fa8c16',
+              boxShadow: '0 0 0 1px #fff'
+            }}
+          />
+        </span>
+      )
+    }
+    return '资产交接'
+  }
 
   const menuItems = [
     {
@@ -40,7 +62,7 @@ const Layout = () => {
     {
       key: '/transfers',
       icon: <SwapOutlined />,
-      label: '资产交接'
+      label: renderTransferLabel()
     },
     {
       key: '/returns',
@@ -48,6 +70,26 @@ const Layout = () => {
       label: '资产退回'
     }
   ]
+
+  const renderApprovalLabel = () => {
+    if (pendingApprovalCount > 0) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          审批管理
+          <Badge
+            count={pendingApprovalCount}
+            size="small"
+            color="#fa8c16"
+            style={{
+              backgroundColor: '#fa8c16',
+              boxShadow: '0 0 0 1px #fff'
+            }}
+          />
+        </span>
+      )
+    }
+    return '审批管理'
+  }
 
   if (isAdmin) {
     menuItems.push(
@@ -59,7 +101,7 @@ const Layout = () => {
       {
         key: '/approvals',
         icon: <CheckCircleOutlined />,
-        label: '审批管理'
+        label: renderApprovalLabel()
       }
     )
   }

@@ -23,9 +23,11 @@ class AssetStatus(str, enum.Enum):
 
 class ApprovalStatus(str, enum.Enum):
     """审批状态枚举"""
+    WAITING_CONFIRMATION = "waiting_confirmation"  # 待转入人确认
     PENDING = "pending"    # 待审批
     APPROVED = "approved"  # 已批准
     REJECTED = "rejected"  # 已拒绝
+    CONFIRMATION_REJECTED = "confirmation_rejected"  # 转入人拒绝
 
 
 class User(Base):
@@ -103,9 +105,12 @@ class TransferRequest(Base):
     to_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="转入用户ID")
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="申请创建人ID（可能是管理员代为申请）")
     reason = Column(Text, nullable=True, comment="交接原因")
-    status = Column(String(20), default=ApprovalStatus.PENDING.value, nullable=False, comment="审批状态")
+    status = Column(String(20), default=ApprovalStatus.WAITING_CONFIRMATION.value, nullable=False, comment="审批状态")
     approver_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="审批人ID")
     approval_comment = Column(Text, nullable=True, comment="审批意见")
+    to_user_confirmed = Column(Integer, nullable=True, comment="转入人确认状态：1-已确认，0-已拒绝，NULL-待确认")
+    to_user_confirm_comment = Column(Text, nullable=True, comment="转入人确认备注")
+    to_user_confirmed_at = Column(DateTime(timezone=True), nullable=True, comment="转入人确认时间")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     approved_at = Column(DateTime(timezone=True), nullable=True, comment="审批时间")

@@ -2,8 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { Table, Tabs, Button, Modal, Form, Input, message, Tag, Space, Descriptions, Divider } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { useTransfer } from '../contexts/TransferContext'
 
 const ApprovalManagement = () => {
+  const { refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
   const [returns, setReturns] = useState([])
   const [edits, setEdits] = useState([])
@@ -75,6 +77,8 @@ const ApprovalManagement = () => {
       fetchTransfers()
       fetchReturns()
       fetchEdits()
+      // 刷新侧边栏的待审批数量
+      refreshPendingApprovals()
     } catch (error) {
       message.error(error.response?.data?.detail || '审批失败')
     }

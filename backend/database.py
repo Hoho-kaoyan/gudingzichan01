@@ -5,7 +5,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# 数据库文件路径
+# 数据库文件路径（相对于backend目录）
 SQLALCHEMY_DATABASE_URL = "sqlite:///./assets.db"
 
 # 创建数据库引擎
@@ -27,6 +27,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-
-

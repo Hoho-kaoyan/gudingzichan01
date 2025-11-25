@@ -55,4 +55,3 @@ except Exception as e:
     raise
 finally:
     conn.close()
-

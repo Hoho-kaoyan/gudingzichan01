@@ -13,6 +13,7 @@ from auth import get_current_user
 import pandas as pd
 import io
 from fastapi.responses import StreamingResponse
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -199,6 +200,8 @@ async def create_asset(
     db.add(db_asset)
     db.flush()  # 先flush获取ID
     
+    logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产: {db_asset.asset_number} - {db_asset.name}")
+    
     # 记录创建历史
     try:
         create_history = get_create_history_record()
@@ -217,7 +220,7 @@ async def create_asset(
             }
         )
     except Exception as e:
-        print(f"记录创建历史失败: {e}")
+        logger.error(f"记录创建历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(db_asset)
@@ -296,7 +299,9 @@ async def update_asset(
                 related_request_type="edit"
             )
         except Exception as e:
-            print(f"记录编辑申请历史失败: {e}")
+            logger.error(f"记录编辑申请历史失败: {e}", exc_info=True)
+        
+        logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 提交资产编辑申请: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(changed_fields.keys()) if changed_fields else '无'}")
         
         db.commit()
         # 返回成功消息，前端需要特殊处理
@@ -339,6 +344,7 @@ async def update_asset(
     
     # 记录编辑历史
     if changed_fields:
+        logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 编辑资产: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(changed_fields)}")
         try:
             create_history = get_create_history_record()
             new_values = {field: getattr(asset, field) for field in changed_fields}
@@ -352,7 +358,7 @@ async def update_asset(
                 new_value=new_values
             )
         except Exception as e:
-            print(f"记录编辑历史失败: {e}")
+            logger.error(f"记录编辑历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(asset)
@@ -383,6 +389,8 @@ async def delete_asset(
     asset.deleted_at = datetime.utcnow()
     asset.deleted_by_id = current_user.id
     
+    logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 删除资产: {asset.asset_number} - {asset.name}")
+    
     # 记录删除历史
     try:
         create_history = get_create_history_record()
@@ -400,7 +408,7 @@ async def delete_asset(
             }
         )
     except Exception as e:
-        print(f"记录删除历史失败: {e}")
+        logger.error(f"记录删除历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(asset)
@@ -529,7 +537,3 @@ async def import_assets(
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"导入失败：{str(e)}")
-
-
-
-

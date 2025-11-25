@@ -213,7 +213,7 @@ async def create_return_request(
             related_request_type="return"
         )
     except Exception as e:
-        print(f"记录退回历史失败: {e}")
+        logger.error(f"记录退回历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(db_request)
@@ -225,4 +225,3 @@ async def create_return_request(
         joinedload(ReturnRequest.approver)
     ).filter(ReturnRequest.id == db_request.id).first()
     return ReturnRequestResponse.model_validate(db_request)
-

@@ -63,7 +63,3 @@ async def login(
         token_type="bearer",
         user=UserResponse.model_validate(user)
     )
-
-
-
-

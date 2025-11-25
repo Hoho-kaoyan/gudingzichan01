@@ -29,6 +29,3 @@ const ResizableTitle = (props) => {
 }
 
 export default ResizableTitle
-
-
-

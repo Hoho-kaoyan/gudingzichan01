@@ -10,6 +10,7 @@ from database import get_db
 from models import AssetEditRequest, Asset, User
 from schemas import AssetEditRequestCreate, AssetEditRequestResponse
 from auth import get_current_user
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -201,7 +202,7 @@ async def create_edit_request(
             related_request_type="edit"
         )
     except Exception as e:
-        print(f"记录编辑申请历史失败: {e}")
+        logger.error(f"记录编辑申请历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(db_request)
@@ -229,5 +230,3 @@ async def create_edit_request(
         "approver": db_request.approver
     }
     return AssetEditRequestResponse(**req_dict)
-
-

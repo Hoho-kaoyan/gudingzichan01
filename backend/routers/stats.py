@@ -43,7 +43,3 @@ async def get_stats(
         "in_use_assets": in_use_assets or 0,
         "pending_approvals": (pending_transfers or 0) + (pending_returns or 0)
     }
-
-
-
-

@@ -23,4 +23,3 @@ class AssetHistoryResponse(BaseModel):
     
     class Config:
         from_attributes = True
-

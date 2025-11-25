@@ -39,4 +39,3 @@ async def create_category(
     db.commit()
     db.refresh(db_category)
     return AssetCategoryResponse.model_validate(db_category)
-

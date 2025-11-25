@@ -1,5 +1,7 @@
 # 快速启动指南
 
+本指南帮助您快速启动固定资产管理系统。
+
 ## 第一步：初始化后端
 
 1. 进入后端目录：
@@ -25,6 +27,10 @@ pip install -r requirements.txt
 ```bash
 python init_db.py
 ```
+
+**初始化脚本会创建：**
+- 默认管理员账户（EHR号：0000001，密码：admin123）
+- 常用资产大类（办公用品、电子设备配件等）
 
 5. 启动后端服务：
 ```bash
@@ -64,6 +70,7 @@ npm run dev
 2. 在"资产管理"中添加资产
 3. 测试资产交接和退回功能
 4. 在"审批管理"中审批申请
+5. 查看资产历史记录
 
 ## 常见问题
 
@@ -71,123 +78,50 @@ npm run dev
 - 确保已安装所有依赖：`pip install -r requirements.txt`
 - 检查端口8000是否被占用
 - 确保虚拟环境已激活
+- 确保已运行 `python init_db.py` 初始化数据库
 
 ### 前端启动失败
 - 确保已安装Node.js和npm
 - 删除node_modules文件夹，重新运行`npm install`
 - 检查端口3000是否被占用
+- 确保 `frontend/index.html` 文件格式正确（无重复内容）
 
 ### 无法登录
 - 确保已运行`python init_db.py`初始化数据库
-- 检查后端服务是否正常运行
+- 检查后端服务是否正常运行（访问 http://localhost:8000/docs）
 - 查看浏览器控制台和网络请求
+- 确认EHR号和密码正确（默认：0000001 / admin123）
 
 ### Excel导入失败
 - 确保Excel文件格式正确
-- 检查列名是否与文档中的格式一致
+- 检查列名是否与文档中的格式一致（参考 `IMPORT_GUIDE.md`）
 - 查看后端日志了解具体错误信息
+- 确认必填列是否存在
+
+### 数据库问题
+- 如果数据库文件损坏，可以删除 `backend/assets.db` 后重新运行 `init_db.py`
+- 确保有数据库文件的写入权限
 
 ## 下一步
 
-- 阅读完整的README.md了解详细功能
-- 查看API文档：http://localhost:8000/docs
+- 阅读完整的 [README.md](README.md) 了解详细功能
+- 查看 [批量导入教程](IMPORT_GUIDE.md) 学习如何批量导入数据
+- 查看 [功能模块详细说明](FEATURES.md) 了解各模块实现
+- 访问API文档：http://localhost:8000/docs
 - 根据需要修改配置和扩展功能
 
+## 系统要求
 
+- Python 3.8+
+- Node.js 16+
+- npm 或 yarn
 
-## 第一步：初始化后端
+## 默认配置
 
-1. 进入后端目录：
-```bash
-cd backend
-```
+- 后端端口：8000
+- 前端端口：3000
+- 数据库：SQLite (backend/assets.db)
 
-2. 激活虚拟环境（如果还没有）：
-```bash
-# Windows
-venv\Scripts\activate
-
-# Linux/Mac
-source venv/bin/activate
-```
-
-3. 安装依赖（如果还没有）：
-```bash
-pip install -r requirements.txt
-```
-
-4. 初始化数据库（创建管理员账户和资产大类）：
-```bash
-python init_db.py
-```
-
-5. 启动后端服务：
-```bash
-uvicorn main:app --reload --port 8000
-```
-
-后端服务将在 http://localhost:8000 启动
-API文档：http://localhost:8000/docs
-
-## 第二步：启动前端
-
-1. 打开新的终端窗口，进入前端目录：
-```bash
-cd frontend
-```
-
-2. 安装依赖（首次运行）：
-```bash
-npm install
-```
-
-3. 启动前端开发服务器：
-```bash
-npm run dev
-```
-
-前端应用将在 http://localhost:3000 启动
-
-## 第三步：登录系统
-
-使用默认管理员账户登录：
-- **EHR号**：0000001
-- **密码**：admin123
-
-登录后，您可以：
-1. 在"用户管理"中创建更多用户
-2. 在"资产管理"中添加资产
-3. 测试资产交接和退回功能
-4. 在"审批管理"中审批申请
-
-## 常见问题
-
-### 后端启动失败
-- 确保已安装所有依赖：`pip install -r requirements.txt`
-- 检查端口8000是否被占用
-- 确保虚拟环境已激活
-
-### 前端启动失败
-- 确保已安装Node.js和npm
-- 删除node_modules文件夹，重新运行`npm install`
-- 检查端口3000是否被占用
-
-### 无法登录
-- 确保已运行`python init_db.py`初始化数据库
-- 检查后端服务是否正常运行
-- 查看浏览器控制台和网络请求
-
-### Excel导入失败
-- 确保Excel文件格式正确
-- 检查列名是否与文档中的格式一致
-- 查看后端日志了解具体错误信息
-
-## 下一步
-
-- 阅读完整的README.md了解详细功能
-- 查看API文档：http://localhost:8000/docs
-- 根据需要修改配置和扩展功能
-
-
-
-
+如需修改端口，请参考：
+- 后端：修改启动命令中的 `--port` 参数
+- 前端：修改 `frontend/vite.config.js` 中的 `server.port`

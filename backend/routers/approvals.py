@@ -8,6 +8,7 @@ from database import get_db
 from models import TransferRequest, ReturnRequest, AssetEditRequest, Asset, User
 from schemas import ApprovalRequest
 from auth import get_current_admin_user
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -61,6 +62,8 @@ async def approve_request(
                 # 获取转出用户信息
                 from_user = db.query(User).filter(User.id == request.from_user_id).first()
                 
+                logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}, 申请ID {request.id}")
+                
                 # 记录审批通过历史
                 # operator_id 应该是实际发起申请的用户，而不是转出用户
                 # 如果管理员代为申请，应该显示管理员；否则显示转出用户
@@ -81,11 +84,13 @@ async def approve_request(
                         related_request_type="transfer"
                     )
                 except Exception as e:
-                    print(f"记录审批历史失败: {e}")
+                    logger.error(f"记录审批历史失败: {e}", exc_info=True)
         else:
             # 记录审批拒绝历史
             # operator_id 应该是实际发起申请的用户
             operator_id = request.created_by_id if request.created_by_id else request.from_user_id
+            
+            logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 拒绝资产交接申请: 资产ID {request.asset_id}, 申请ID {request.id}")
             
             try:
                 create_history = get_create_history_record()
@@ -100,7 +105,7 @@ async def approve_request(
                     related_request_type="transfer"
                 )
             except Exception as e:
-                print(f"记录审批历史失败: {e}")
+                logger.error(f"记录审批历史失败: {e}", exc_info=True)
         
         db.commit()
         return {"message": "审批完成"}
@@ -206,9 +211,11 @@ async def approve_request(
                     # 其他字段保持不变
                 
                 # 记录审批通过历史
+                new_user_obj = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
+                logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产退回申请: 资产ID {asset.id}({asset.asset_number}), 申请ID {request.id}")
+                
                 try:
                     create_history = get_create_history_record()
-                    new_user_obj = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
                     new_values = {
                         "user_id": asset.user_id,
                         "user_name": new_user_obj.real_name if new_user_obj else "仓库",
@@ -243,9 +250,12 @@ async def approve_request(
                         related_request_type="return"
                     )
                 except Exception as e:
-                    print(f"记录审批历史失败: {e}")
+                    logger.error(f"记录审批历史失败: {e}", exc_info=True)
         else:
             # 记录审批拒绝历史
+            asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+            logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 拒绝资产退回申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+            
             try:
                 create_history = get_create_history_record()
                 create_history(
@@ -259,7 +269,7 @@ async def approve_request(
                     related_request_type="return"
                 )
             except Exception as e:
-                print(f"记录审批历史失败: {e}")
+                logger.error(f"记录审批历史失败: {e}", exc_info=True)
         
         db.commit()
         return {"message": "审批完成"}
@@ -319,6 +329,8 @@ async def approve_request(
                     if user:
                         asset.user_group = user.group
                 
+                logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产编辑申请: 资产ID {asset.id}({asset.asset_number}), 修改字段: {', '.join(changed_fields) if changed_fields else '无'}, 申请ID {request.id}")
+                
                 # 记录审批通过历史
                 try:
                     create_history = get_create_history_record()
@@ -336,9 +348,12 @@ async def approve_request(
                         related_request_type="edit"
                     )
                 except Exception as e:
-                    print(f"记录审批历史失败: {e}")
+                    logger.error(f"记录审批历史失败: {e}", exc_info=True)
         else:
             # 记录审批拒绝历史
+            asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+            logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 拒绝资产编辑申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+            
             try:
                 create_history = get_create_history_record()
                 create_history(
@@ -352,7 +367,7 @@ async def approve_request(
                     related_request_type="edit"
                 )
             except Exception as e:
-                print(f"记录审批历史失败: {e}")
+                logger.error(f"记录审批历史失败: {e}", exc_info=True)
         
         db.commit()
         return {"message": "审批完成"}

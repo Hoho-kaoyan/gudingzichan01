@@ -10,6 +10,7 @@ from database import get_db
 from models import AssetEditRequest, Asset, User
 from schemas import AssetEditRequestCreate, AssetEditRequestResponse
 from auth import get_current_user
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -23,11 +24,11 @@ async def get_edit_requests(
     skip: int = 0,
     limit: int = 100,
     status: Optional[str] = None,
-    search: Optional[str] = Query(None, description="搜索关键词，支持模糊搜索所有字段"),
+    search: Optional[str] = Query(None, description="搜索关键词,支持模糊搜索所有字段"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取编辑申请列表，支持搜索"""
+    """获取编辑申请列表,支持搜索"""
     query = db.query(AssetEditRequest)
     
     # 普通用户只能看到自己的申请
@@ -193,7 +194,7 @@ async def create_edit_request(
             db=db,
             asset_id=edit_data.asset_id,
             action_type="edit",
-            action_description=f"申请编辑资产：修改了 {', '.join(changed_fields.keys()) if changed_fields else '无变化'}",
+            action_description=f"申请编辑资产:修改了 {', '.join(changed_fields.keys()) if changed_fields else '无变化'}",
             operator_id=current_user.id,
             old_value={k: old_values.get(k) for k in changed_fields.keys() if k in old_values},
             new_value=changed_fields,
@@ -201,7 +202,7 @@ async def create_edit_request(
             related_request_type="edit"
         )
     except Exception as e:
-        print(f"记录编辑申请历史失败: {e}")
+        logger.error(f"记录编辑申请历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(db_request)
@@ -229,5 +230,3 @@ async def create_edit_request(
         "approver": db_request.approver
     }
     return AssetEditRequestResponse(**req_dict)
-
-

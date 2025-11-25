@@ -192,4 +192,3 @@ class AssetEditRequest(Base):
     asset = relationship("Asset")
     user = relationship("User", foreign_keys=[user_id])
     approver = relationship("User", foreign_keys=[approver_id])
-

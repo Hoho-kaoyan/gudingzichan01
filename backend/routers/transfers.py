@@ -9,6 +9,7 @@ from database import get_db
 from models import TransferRequest, Asset, User
 from schemas import TransferRequestCreate, TransferRequestResponse
 from auth import get_current_user
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -159,6 +160,8 @@ async def create_transfer_request(
     from_user = db.query(User).filter(User.id == from_user_id).first()
     to_user = db.query(User).filter(User.id == transfer_data.to_user_id).first()
     
+    logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}")
+    
     # 记录交接申请历史
     try:
         create_history = get_create_history_record()
@@ -174,7 +177,7 @@ async def create_transfer_request(
             related_request_type="transfer"
         )
     except Exception as e:
-        print(f"记录交接历史失败: {e}")
+        logger.error(f"记录交接历史失败: {e}", exc_info=True)
     
     db.commit()
     db.refresh(db_request)
@@ -206,6 +209,9 @@ async def cancel_transfer_request(
     if not can_cancel:
         raise HTTPException(status_code=403, detail="只有申请创建人可以撤回申请")
     
+    asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+    logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 撤回资产交接申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+    
     # 记录撤回历史
     try:
         create_history = get_create_history_record()
@@ -219,7 +225,7 @@ async def cancel_transfer_request(
             related_request_type="transfer"
         )
     except Exception as e:
-        print(f"记录撤回历史失败: {e}")
+        logger.error(f"记录撤回历史失败: {e}", exc_info=True)
     
     # 删除申请
     db.delete(request)

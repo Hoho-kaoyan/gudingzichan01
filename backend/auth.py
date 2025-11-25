@@ -110,6 +110,3 @@ async def get_current_admin_user(
             detail="权限不足，需要管理员权限"
         )
     return current_user
-
-
-

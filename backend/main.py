@@ -4,8 +4,8 @@ FastAPI主应用入口
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import auth, users, assets, transfers, returns, approvals, categories, stats, asset_history
-
+from routers import auth, users, assets, transfers, returns, approvals, categories, stats, asset_history, edit_requests
+import uvicorn
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
 
@@ -36,7 +36,6 @@ app.include_router(approvals.router, prefix="/api/approvals", tags=["审批管�
 app.include_router(stats.router, prefix="/api/stats", tags=["统计信息"])
 app.include_router(asset_history.router, prefix="/api/asset-history", tags=["资产流转记录"])
 app.include_router(edit_requests.router, prefix="/api/edit-requests", tags=["资产编辑申请"])
-app.include_router(edit_requests.router, prefix="/api/edit-requests", tags=["资产编辑申请"])
 
 
 @app.get("/")
@@ -50,3 +49,6 @@ async def health_check():
     """健康检查"""
     return {"status": "ok"}
 
+
+if __name__ == "__main__":
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True) 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag, AutoComplete } from 'antd'
 import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -8,16 +8,18 @@ import { useTransfer } from '../contexts/TransferContext'
 const { Option } = Select
 
 const TransferManagement = () => {
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, isAdmin } = useAuth()
   const { refreshPendingConfirmations, refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
   const [assets, setAssets] = useState([])
-  const [users, setUsers] = useState([])
+  const [userOptions, setUserOptions] = useState([])
+  const [toUserSearchValue, setToUserSearchValue] = useState('')
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [confirmModalVisible, setConfirmModalVisible] = useState(false)
   const [currentTransfer, setCurrentTransfer] = useState(null)
   const [form] = Form.useForm()
+  const selectedToUserId = Form.useWatch('to_user_id', form)
   const [confirmForm] = Form.useForm()
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
@@ -67,8 +69,6 @@ const TransferManagement = () => {
     if (!currentUser) return
     try {
       const params = { status: '在用' }
-      // 不再传递user_id参数，因为后端已经允许所有用户查看全部资产
-      // 普通用户只能交接自己名下的资产，这个限制在提交时由后端检查
       const response = await api.get('/assets/', { params })
       setAssets(response.data)
     } catch (error) {
@@ -80,7 +80,12 @@ const TransferManagement = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users/')
-      setUsers(response.data)
+      const options = (response.data || []).map(user => ({
+        label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
+        value: user.id,
+        ehrNumber: user.ehr_number
+      }))
+      setUserOptions(options)
     } catch (error) {
       console.error('获取用户列表失败:', error)
       message.error('获取用户列表失败，请刷新页面重试')
@@ -89,6 +94,7 @@ const TransferManagement = () => {
 
   const handleAdd = () => {
     form.resetFields()
+    setToUserSearchValue('')
     setModalVisible(true)
   }
 
@@ -321,6 +327,8 @@ const TransferManagement = () => {
     }
   ]
 
+  const selectableAssets = isAdmin ? assets : assets.filter((asset) => asset.user?.id === currentUser?.id)
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
@@ -388,28 +396,66 @@ const TransferManagement = () => {
             name="asset_id"
             rules={[{ required: true, message: '请选择资产' }]}
           >
-            <Select>
-              {assets.map(asset => (
+            <Select placeholder={isAdmin ? '请选择资产' : '请选择自己名下的资产'}>
+              {selectableAssets.map((asset) => (
                 <Option key={asset.id} value={asset.id}>
                   {asset.asset_number} - {asset.name}
                 </Option>
               ))}
+              {!isAdmin && selectableAssets.length === 0 && (
+                <Option disabled value="">
+                  暂无可交接资产
+                </Option>
+              )}
             </Select>
           </Form.Item>
           <Form.Item
             label="转入用户"
-            name="to_user_id"
-            rules={[{ required: true, message: '请选择转入用户' }]}
+            required
           >
-            <Select>
-              {users
-                .filter(user => user.id !== currentUser?.id && user.ehr_number !== '1000000') // 过滤掉当前用户和仓库用户
-                .map(user => (
-                  <Option key={user.id} value={user.id}>
-                    {user.real_name} ({user.ehr_number})
-                  </Option>
-                ))}
-            </Select>
+            <AutoComplete
+              value={toUserSearchValue}
+              options={userOptions
+                .filter(option => option.value !== currentUser?.id && option.ehrNumber !== '1000000')
+                .filter(option => option.label.toLowerCase().includes((toUserSearchValue || '').toLowerCase()))
+                .slice(0, 5)
+                .map(option => ({
+                  value: option.label,
+                  userId: option.value
+                }))
+              }
+              placeholder="请输入转入人姓名或EHR号"
+              onSearch={(value) => {
+                setToUserSearchValue(value)
+              }}
+              onSelect={(value, option) => {
+                const selectedOption = userOptions.find(item => item.label === value)
+                if (selectedOption) {
+                  setToUserSearchValue(value)
+                  form.setFieldsValue({ to_user_id: selectedOption.value })
+                }
+              }}
+              onChange={(value) => {
+                setToUserSearchValue(value)
+                form.setFieldsValue({ to_user_id: null })
+              }}
+              allowClear
+              notFoundContent={toUserSearchValue ? '无匹配用户' : null}
+            />
+            <Form.Item
+              name="to_user_id"
+              rules={[{ required: true, message: '请选择转入用户' }]}
+              style={{ display: 'none' }}
+            >
+              <Input />
+            </Form.Item>
+            {toUserSearchValue &&
+              !selectedToUserId &&
+              !userOptions.some(option => option.label === toUserSearchValue) && (
+                <div style={{ color: '#ff4d4f', marginTop: 4, fontSize: 12 }}>
+                  此用户不存在
+                </div>
+            )}
           </Form.Item>
           <Form.Item
             label="交接原因"

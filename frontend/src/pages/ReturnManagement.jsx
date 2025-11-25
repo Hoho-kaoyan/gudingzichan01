@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, message, Space, Divider } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, message, Space, Divider, AutoComplete } from 'antd'
 import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -8,14 +8,16 @@ const { Option } = Select
 const { TextArea } = Input
 
 const ReturnManagement = () => {
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, isAdmin } = useAuth()
   const [returns, setReturns] = useState([])
   const [assets, setAssets] = useState([])
-  const [users, setUsers] = useState([])
+  const [userOptions, setUserOptions] = useState([])
+  const [newKeeperSearchValue, setNewKeeperSearchValue] = useState('')
   const [selectedAsset, setSelectedAsset] = useState(null)
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
   const [form] = Form.useForm()
+  const selectedNewKeeperId = Form.useWatch('new_user_id', form)
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
 
@@ -67,7 +69,12 @@ const ReturnManagement = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users/')
-      setUsers(response.data || [])
+      const options = (response.data || []).map(user => ({
+        label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
+        value: user.id,
+        ehrNumber: user.ehr_number
+      }))
+      setUserOptions(options)
     } catch (error) {
       console.error('获取用户列表失败:', error)
       message.error('获取用户列表失败')
@@ -77,6 +84,7 @@ const ReturnManagement = () => {
   const handleAdd = () => {
     form.resetFields()
     setSelectedAsset(null)
+    setNewKeeperSearchValue('')
     setModalVisible(true)
   }
 
@@ -194,6 +202,8 @@ const ReturnManagement = () => {
     }
   ]
 
+  const selectableAssets = isAdmin ? assets : assets.filter((asset) => asset.user?.id === currentUser?.id)
+
   return (
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
@@ -264,14 +274,19 @@ const ReturnManagement = () => {
             rules={[{ required: true, message: '请选择资产' }]}
           >
             <Select 
-              placeholder="请选择要退回的资产"
+              placeholder={isAdmin ? '请选择要退回的资产' : '请选择自己名下的资产'}
               onChange={handleAssetChange}
             >
-              {assets.map(asset => (
+              {selectableAssets.map(asset => (
                 <Option key={asset.id} value={asset.id}>
                   {asset.asset_number} - {asset.name}
                 </Option>
               ))}
+              {!isAdmin && selectableAssets.length === 0 && (
+                <Option disabled value="">
+                  暂无可退回资产
+                </Option>
+              )}
             </Select>
           </Form.Item>
           
@@ -326,25 +341,52 @@ const ReturnManagement = () => {
 
           <Form.Item
             label="保管人"
-            name="new_user_id"
             tooltip="如指定新的保管人，审批通过后资产将转给该保管人；如不指定，资产将退回仓库"
           >
-            <Select 
+            <AutoComplete
+              value={newKeeperSearchValue}
+              options={userOptions
+                .filter(option => option.ehrNumber !== '1000000')
+                .filter(option => option.label.toLowerCase().includes((newKeeperSearchValue || '').toLowerCase()))
+                .slice(0, 5)
+                .map(option => ({
+                  value: option.label,
+                  userId: option.value
+                }))
+              }
               placeholder="选择新的保管人（可选，不选则退回仓库）"
               allowClear
-              showSearch
-              filterOption={(input, option) =>
-                (option?.children ?? '').toLowerCase().includes(input.toLowerCase())
-              }
+              onSearch={(value) => setNewKeeperSearchValue(value)}
+              onSelect={(value) => {
+                const selectedOption = userOptions.find(option => option.label === value)
+                if (selectedOption) {
+                  setNewKeeperSearchValue(value)
+                  form.setFieldsValue({ new_user_id: selectedOption.value })
+                }
+              }}
+              onChange={(value) => {
+                setNewKeeperSearchValue(value)
+                if (!value) {
+                  form.setFieldsValue({ new_user_id: null })
+                } else {
+                  form.setFieldsValue({ new_user_id: null })
+                }
+              }}
+              notFoundContent={newKeeperSearchValue ? '无匹配用户' : null}
+            />
+            <Form.Item
+              name="new_user_id"
+              style={{ display: 'none' }}
             >
-              {users
-                .filter(user => user.ehr_number !== '1000000') // 过滤掉仓库用户
-                .map(user => (
-                  <Option key={user.id} value={user.id}>
-                    {user.real_name} ({user.ehr_number}) - {user.group}
-                  </Option>
-                ))}
-            </Select>
+              <Input />
+            </Form.Item>
+            {newKeeperSearchValue &&
+              !selectedNewKeeperId &&
+              !userOptions.some(option => option.label === newKeeperSearchValue) && (
+                <div style={{ color: '#ff4d4f', marginTop: 4, fontSize: 12 }}>
+                  此用户不存在
+                </div>
+            )}
           </Form.Item>
 
           <Form.Item

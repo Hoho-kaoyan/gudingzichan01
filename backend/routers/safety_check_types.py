@@ -27,7 +27,17 @@ async def get_check_types(
     check_types = db.query(SafetyCheckType).order_by(SafetyCheckType.created_at.desc()).all()
     result = []
     for ct in check_types:
-        ct_dict = SafetyCheckTypeResponse.model_validate(ct).model_dump()
+        # 手动构建字典，避免Pydantic验证时check_items是字符串的问题
+        ct_dict = {
+            "id": ct.id,
+            "name": ct.name,
+            "description": ct.description,
+            "is_active": ct.is_active,
+            "created_at": ct.created_at,
+            "updated_at": ct.updated_at,
+            "created_by_id": ct.created_by_id,
+            "created_by": ct.created_by
+        }
         # 解析check_items JSON
         if ct.check_items:
             try:
@@ -51,7 +61,17 @@ async def get_check_type(
     if not check_type:
         raise HTTPException(status_code=404, detail="检查类型不存在")
     
-    ct_dict = SafetyCheckTypeResponse.model_validate(check_type).model_dump()
+    # 手动构建字典，避免Pydantic验证时check_items是字符串的问题
+    ct_dict = {
+        "id": check_type.id,
+        "name": check_type.name,
+        "description": check_type.description,
+        "is_active": check_type.is_active,
+        "created_at": check_type.created_at,
+        "updated_at": check_type.updated_at,
+        "created_by_id": check_type.created_by_id,
+        "created_by": check_type.created_by
+    }
     # 解析check_items JSON
     if check_type.check_items:
         try:
@@ -92,8 +112,20 @@ async def create_check_type(
     db.commit()
     db.refresh(db_check_type)
     
-    # 返回结果
-    ct_dict = SafetyCheckTypeResponse.model_validate(db_check_type).model_dump()
+    # 返回结果 - 需要先解析JSON字符串
+    # 手动构建字典，避免Pydantic验证时check_items是字符串的问题
+    ct_dict = {
+        "id": db_check_type.id,
+        "name": db_check_type.name,
+        "description": db_check_type.description,
+        "is_active": db_check_type.is_active,
+        "created_at": db_check_type.created_at,
+        "updated_at": db_check_type.updated_at,
+        "created_by_id": db_check_type.created_by_id,
+        "created_by": db_check_type.created_by
+    }
+    
+    # 解析check_items JSON字符串
     if db_check_type.check_items:
         try:
             ct_dict["check_items"] = json.loads(db_check_type.check_items)
@@ -101,6 +133,7 @@ async def create_check_type(
             ct_dict["check_items"] = []
     else:
         ct_dict["check_items"] = []
+    
     return SafetyCheckTypeResponse(**ct_dict)
 
 
@@ -137,8 +170,19 @@ async def update_check_type(
     db.commit()
     db.refresh(check_type)
     
-    # 返回结果
-    ct_dict = SafetyCheckTypeResponse.model_validate(check_type).model_dump()
+    # 返回结果 - 需要先解析JSON字符串
+    # 手动构建字典，避免Pydantic验证时check_items是字符串的问题
+    ct_dict = {
+        "id": check_type.id,
+        "name": check_type.name,
+        "description": check_type.description,
+        "is_active": check_type.is_active,
+        "created_at": check_type.created_at,
+        "updated_at": check_type.updated_at,
+        "created_by_id": check_type.created_by_id,
+        "created_by": check_type.created_by
+    }
+    
     if check_type.check_items:
         try:
             ct_dict["check_items"] = json.loads(check_type.check_items)

@@ -27,7 +27,8 @@ async def get_my_tasks(
 ):
     """获取我的待检查任务"""
     query = db.query(SafetyCheckTask).join(TaskAsset).filter(
-        TaskAsset.assigned_user_id == current_user.id
+        TaskAsset.assigned_user_id == current_user.id,
+        SafetyCheckTask.status != "cancelled"
     ).distinct()
     
     if status:

@@ -43,7 +43,10 @@ const MySafetyCheckTasks = () => {
         message.warning('该任务没有分配的资产')
         return
       }
-      setCurrentTask(response.data.task || response.data)
+      setCurrentTask({
+        ...response.data.task,
+        check_type: response.data.check_type
+      })
       setCurrentAssets(assets)
       setCurrentAssetIndex(0)
       form.resetFields()
@@ -92,7 +95,6 @@ const MySafetyCheckTasks = () => {
         }
       })
       form.setFieldsValue({
-        check_result: currentAsset.check_result || '',
         check_comment: currentAsset.check_comment || '',
         ...itemsResult
       })
@@ -129,9 +131,11 @@ const MySafetyCheckTasks = () => {
         })
       }
 
+      const overallResult = checkItemsResult.some(item => item.result === 'no') ? 'no' : 'yes'
+
       const payload = {
         task_asset_id: currentAsset.id,
-        check_result: values.check_result,
+        check_result: overallResult,
         check_comment: values.check_comment,
         check_items_result: checkItemsResult
       }
@@ -144,7 +148,7 @@ const MySafetyCheckTasks = () => {
       updatedAssets[currentAssetIndex] = {
         ...currentAsset,
         status: 'checked',
-        check_result: values.check_result,
+        check_result: overallResult,
         check_comment: values.check_comment,
         check_items_result: checkItemsResult
       }
@@ -334,17 +338,6 @@ const MySafetyCheckTasks = () => {
                     ))}
                   </div>
                 )}
-
-                <Form.Item
-                  label="整体检查结果"
-                  name="check_result"
-                  rules={[{ required: true, message: '请选择整体检查结果' }]}
-                >
-                  <Radio.Group>
-                    <Radio value="yes">是（通过）</Radio>
-                    <Radio value="no">否（不通过）</Radio>
-                  </Radio.Group>
-                </Form.Item>
 
                 <Form.Item
                   label="检查备注"

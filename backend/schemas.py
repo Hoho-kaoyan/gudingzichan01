@@ -2,10 +2,11 @@
 Pydantic模式定义
 用于API请求和响应的数据验证
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, field_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
+import json
 
 
 # 用户相关模式
@@ -265,6 +266,18 @@ class SafetyCheckTypeBase(BaseModel):
     check_items: Optional[List[CheckItem]] = Field(None, description="检查项列表")
     is_active: bool = Field(default=True, description="是否启用")
 
+    @field_validator("check_items", mode="before")
+    @classmethod
+    def parse_check_items(cls, v):
+        if v is None:
+            return None
+        if isinstance(v, str):
+            try:
+                data = json.loads(v)
+                return data
+            except Exception:
+                return None
+        return v
 
 class SafetyCheckTypeCreate(SafetyCheckTypeBase):
     pass
@@ -295,12 +308,26 @@ class SafetyCheckTaskCreate(BaseModel):
     asset_ids: List[int] = Field(..., description="资产ID列表")
     deadline: Optional[datetime] = Field(None, description="截止时间")
 
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def parse_deadline(cls, v):
+        if v in (None, "", "null"):
+            return None
+        return v
+
 
 class SafetyCheckTaskUpdate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
     deadline: Optional[datetime] = None
     status: Optional[str] = None
+
+    @field_validator("deadline", mode="before")
+    @classmethod
+    def parse_deadline(cls, v):
+        if v in (None, "", "null"):
+            return None
+        return v
 
 
 class SafetyCheckTaskResponse(BaseModel):

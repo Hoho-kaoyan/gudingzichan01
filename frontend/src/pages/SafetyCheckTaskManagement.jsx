@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip } from 'antd'
 import { PlusOutlined, EyeOutlined, CloseOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -19,6 +19,11 @@ const SafetyCheckTaskManagement = () => {
   const [assets, setAssets] = useState([])
   const [selectedAssets, setSelectedAssets] = useState([])
   const [assetFilters, setAssetFilters] = useState({})
+  const [formValues, setFormValues] = useState({})
+  const [detailModalVisible, setDetailModalVisible] = useState(false)
+  const [detailTask, setDetailTask] = useState(null)
+  const [detailAssets, setDetailAssets] = useState([])
+  const [detailLoading, setDetailLoading] = useState(false)
   const [form] = Form.useForm()
   const [filterForm] = Form.useForm()
 
@@ -35,6 +40,7 @@ const SafetyCheckTaskManagement = () => {
     try {
       const params = { ...filters, page: 1, limit: 100 }
       const response = await api.get('/safety-check-tasks/', { params })
+      console.log(response.data)
       setTasks(response.data.items || [])
     } catch (error) {
       message.error('获取任务列表失败')
@@ -78,6 +84,7 @@ const SafetyCheckTaskManagement = () => {
     setCreateStep(0)
     setSelectedAssets([])
     form.resetFields()
+    setFormValues({})
     filterForm.resetFields()
     setAssetFilters({})
     setModalVisible(true)
@@ -114,7 +121,17 @@ const SafetyCheckTaskManagement = () => {
 
   const handleSubmit = async () => {
     try {
-      const values = form.getFieldsValue()
+      const values = { ...formValues, ...form.getFieldsValue(true) }
+      if (!values.check_type_id) {
+        message.error('请选择检查类型')
+        setCreateStep(0)
+        return
+      }
+      if (!values.title) {
+        message.error('请输入任务标题')
+        setCreateStep(1)
+        return
+      }
       const payload = {
         check_type_id: values.check_type_id,
         title: values.title,
@@ -142,8 +159,23 @@ const SafetyCheckTaskManagement = () => {
   }
 
   const handleViewDetail = async (taskId) => {
-    // 可以打开详情弹窗或跳转到详情页
-    message.info('查看任务详情功能待实现')
+    setDetailModalVisible(true)
+    setDetailLoading(true)
+    try {
+      const [taskRes, assetsRes] = await Promise.all([
+        api.get(`/safety-check-tasks/${taskId}`),
+        api.get(`/safety-check-tasks/${taskId}/assets`)
+      ])
+      setDetailTask(taskRes.data)
+      // assetsRes.data.assets 是 TaskAssetResponse 对象数组
+      setDetailAssets(assetsRes.data.assets || [])
+    } catch (error) {
+      console.error('获取任务详情失败:', error)
+      message.error(error.response?.data?.detail || '获取任务详情失败')
+      setDetailModalVisible(false)
+    } finally {
+      setDetailLoading(false)
+    }
   }
 
   const handleAssetSearch = () => {
@@ -178,7 +210,18 @@ const SafetyCheckTaskManagement = () => {
       title: '任务编号',
       dataIndex: 'task_number',
       key: 'task_number',
-      width: 150
+      width: 200,
+      ellipsis: {
+        showTitle: false
+      },
+      render: (value) =>
+        value ? (
+          <Tooltip placement="topLeft" title={value}>
+            {value}
+          </Tooltip>
+        ) : (
+          '-'
+        )
     },
     {
       title: '任务标题',
@@ -229,11 +272,12 @@ const SafetyCheckTaskManagement = () => {
     {
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 180,
       fixed: 'right',
+      align: 'center',
       render: (_, record) => (
-        <Space>
-          <Button type="link" icon={<EyeOutlined />} onClick={() => handleViewDetail(record.id)}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+          <Button type="link" icon={<EyeOutlined />} onClick={() => handleViewDetail(record.id)} style={{ padding: 0 }}>
             查看
           </Button>
           {record.status === 'pending' && (
@@ -243,12 +287,12 @@ const SafetyCheckTaskManagement = () => {
               okText="确定"
               cancelText="取消"
             >
-              <Button type="link" danger icon={<CloseOutlined />}>
+              <Button type="link" danger icon={<CloseOutlined />} style={{ padding: 0 }}>
                 取消
               </Button>
             </Popconfirm>
           )}
-        </Space>
+        </div>
       )
     }
   ]
@@ -298,7 +342,11 @@ const SafetyCheckTaskManagement = () => {
           <Steps.Step title="确认发布" />
         </Steps>
 
-        <Form form={form} layout="vertical">
+        <Form
+          form={form}
+          layout="vertical"
+          onValuesChange={(_, allValues) => setFormValues(allValues)}
+        >
           {createStep === 0 && (
             <div>
               <Form.Item
@@ -398,7 +446,7 @@ const SafetyCheckTaskManagement = () => {
 
               <Card size="small" style={{ marginTop: 16 }}>
                 <h4>任务预览</h4>
-                <p>检查类型: {checkTypes.find(t => t.id === form.getFieldValue('check_type_id'))?.name || '-'}</p>
+                <p>检查类型: {checkTypes.find(t => t.id === formValues.check_type_id)?.name || '-'}</p>
                 <p>资产数量: {selectedAssets.length}</p>
                 <p>分配用户: {getAssetDistribution().length}人</p>
               </Card>
@@ -409,8 +457,8 @@ const SafetyCheckTaskManagement = () => {
             <div>
               <Card>
                 <h4>请确认任务信息</h4>
-                <p><strong>任务标题:</strong> {form.getFieldValue('title')}</p>
-                <p><strong>检查类型:</strong> {checkTypes.find(t => t.id === form.getFieldValue('check_type_id'))?.name || '-'}</p>
+                <p><strong>任务标题:</strong> {formValues.title || '-'}</p>
+                <p><strong>检查类型:</strong> {checkTypes.find(t => t.id === formValues.check_type_id)?.name || '-'}</p>
                 <p><strong>资产数量:</strong> {selectedAssets.length}</p>
                 <p><strong>分配用户:</strong></p>
                 <ul>
@@ -418,7 +466,7 @@ const SafetyCheckTaskManagement = () => {
                     <li key={index}>{dist.name} ({dist.count}项)</li>
                   ))}
                 </ul>
-                <p><strong>截止时间:</strong> {form.getFieldValue('deadline') ? form.getFieldValue('deadline').format('YYYY-MM-DD HH:mm') : '无'}</p>
+                <p><strong>截止时间:</strong> {formValues.deadline ? formValues.deadline.format('YYYY-MM-DD HH:mm') : '无'}</p>
               </Card>
             </div>
           )}
@@ -440,6 +488,85 @@ const SafetyCheckTaskManagement = () => {
             )}
           </div>
         </Form>
+      </Modal>
+
+      <Modal
+        title="任务详情"
+        open={detailModalVisible}
+        onCancel={() => {
+          setDetailModalVisible(false)
+          setDetailTask(null)
+          setDetailAssets([])
+        }}
+        width={900}
+        footer={null}
+        destroyOnClose
+      >
+        {detailLoading ? (
+          <div style={{ textAlign: 'center', padding: 40 }}>加载中...</div>
+        ) : detailTask ? (
+          <div>
+            <Card size="small" style={{ marginBottom: 16 }}>
+              <p><strong>任务编号：</strong>{detailTask.task_number}</p>
+              <p><strong>任务标题：</strong>{detailTask.title}</p>
+              <p><strong>检查类型：</strong>{detailTask.check_type?.name || '-'}</p>
+              <p><strong>创建时间：</strong>{dayjs(detailTask.created_at).format('YYYY-MM-DD HH:mm')}</p>
+              <p><strong>截止时间：</strong>{detailTask.deadline ? dayjs(detailTask.deadline).format('YYYY-MM-DD HH:mm') : '无'}</p>
+              <p><strong>描述：</strong>{detailTask.description || '无'}</p>
+            </Card>
+            <Card size="small" title="完成情况" style={{ marginBottom: 16 }}>
+              <Space size="large">
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 600 }}>{detailTask.total_assets ?? detailAssets.length}</div>
+                  <div>任务总数</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#52c41a' }}>{detailAssets.filter(a => a.status === 'checked').length}</div>
+                  <div>已完成</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>{detailAssets.filter(a => a.status !== 'checked').length}</div>
+                  <div>未完成</div>
+                </div>
+              </Space>
+            </Card>
+            <Card size="small" title="未完成名单" style={{ marginBottom: 16 }}>
+              {detailAssets.filter(a => a.status !== 'checked').length === 0 ? (
+                <div>全部完成</div>
+              ) : (
+                detailAssets
+                  .filter(a => a.status !== 'checked')
+                  .map(asset => (
+                    <div key={asset.id} style={{ marginBottom: 8 }}>
+                      <Tag color="orange">待检查</Tag>
+                      {asset.asset?.asset_number || '-'} - {asset.asset?.name || '-'}（{asset.assigned_user?.real_name || '未知使用人'}）
+                    </div>
+                  ))
+              )}
+            </Card>
+            <Card size="small" title="全部资产进度">
+              {detailAssets.length === 0 ? (
+                <div>暂无数据</div>
+              ) : (
+                <div style={{ maxHeight: 300, overflow: 'auto' }}>
+                  {detailAssets.map(asset => (
+                    <div key={asset.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
+                      <div>
+                        <div>{asset.asset?.asset_number || '-'} - {asset.asset?.name || '-'}</div>
+                        <div style={{ color: '#888' }}>使用人：{asset.assigned_user?.real_name || '未知'}</div>
+                      </div>
+                      <Tag color={asset.status === 'checked' ? 'green' : 'orange'}>
+                        {asset.status === 'checked' ? '已完成' : '待检查'}
+                      </Tag>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
+          </div>
+        ) : (
+          <div style={{ textAlign: 'center', padding: 40 }}>暂无数据</div>
+        )}
       </Modal>
     </div>
   )

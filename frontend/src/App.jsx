@@ -12,6 +12,9 @@ import AssetHistory from './pages/AssetHistory'
 import TransferManagement from './pages/TransferManagement'
 import ReturnManagement from './pages/ReturnManagement'
 import ApprovalManagement from './pages/ApprovalManagement'
+import SafetyCheckTypeManagement from './pages/SafetyCheckTypeManagement'
+import SafetyCheckTaskManagement from './pages/SafetyCheckTaskManagement'
+import MySafetyCheckTasks from './pages/MySafetyCheckTasks'
 
 function App() {
   return (
@@ -36,6 +39,9 @@ function App() {
             <Route path="transfers" element={<TransferManagement />} />
             <Route path="returns" element={<ReturnManagement />} />
             <Route path="approvals" element={<ApprovalManagement />} />
+            <Route path="safety-check-types" element={<SafetyCheckTypeManagement />} />
+            <Route path="safety-check-tasks" element={<SafetyCheckTaskManagement />} />
+            <Route path="my-safety-check-tasks" element={<MySafetyCheckTasks />} />
           </Route>
         </Routes>
       </Router>

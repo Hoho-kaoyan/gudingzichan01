@@ -2,11 +2,12 @@
 数据库模型定义
 包含用户、资产、审批流程等模型
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
 import enum
+import json
 
 
 class UserRole(str, enum.Enum):
@@ -197,3 +198,125 @@ class AssetEditRequest(Base):
     asset = relationship("Asset")
     user = relationship("User", foreign_keys=[user_id])
     approver = relationship("User", foreign_keys=[approver_id])
+
+
+class SafetyCheckType(Base):
+    """安全检查类型模型"""
+    __tablename__ = "safety_check_types"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String(100), unique=True, nullable=False, comment="检查类型名称")
+    description = Column(Text, nullable=True, comment="检查类型描述")
+    check_items = Column(Text, nullable=True, comment="检查项列表（JSON格式）")
+    is_active = Column(Boolean, default=True, nullable=False, comment="是否启用")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="创建人ID")
+    
+    # 关系
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    tasks = relationship("SafetyCheckTask", back_populates="check_type")
+    
+    def get_check_items(self):
+        """获取检查项列表（解析JSON）"""
+        if self.check_items:
+            try:
+                return json.loads(self.check_items)
+            except:
+                return []
+        return []
+    
+    def set_check_items(self, items):
+        """设置检查项列表（转换为JSON）"""
+        self.check_items = json.dumps(items, ensure_ascii=False) if items else None
+
+
+class SafetyCheckTask(Base):
+    """安全检查任务模型"""
+    __tablename__ = "safety_check_tasks"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    task_number = Column(String(50), unique=True, nullable=False, index=True, comment="任务编号")
+    check_type_id = Column(Integer, ForeignKey("safety_check_types.id"), nullable=False, comment="检查类型ID")
+    title = Column(String(200), nullable=False, comment="任务标题")
+    description = Column(Text, nullable=True, comment="任务描述")
+    deadline = Column(DateTime(timezone=True), nullable=True, comment="截止时间")
+    status = Column(String(20), default="pending", nullable=False, comment="任务状态：pending/completed/overdue/cancelled")
+    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="创建人ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True, comment="完成时间")
+    
+    # 关系
+    check_type = relationship("SafetyCheckType", back_populates="tasks")
+    created_by = relationship("User", foreign_keys=[created_by_id])
+    task_assets = relationship("TaskAsset", back_populates="task", cascade="all, delete-orphan")
+
+
+class TaskAsset(Base):
+    """任务资产关联模型"""
+    __tablename__ = "task_assets"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=False, comment="任务ID")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, comment="资产ID")
+    assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="分配用户ID（资产使用人）")
+    status = Column(String(20), default="pending", nullable=False, comment="检查状态：pending/checked/overdue")
+    check_result = Column(String(20), nullable=True, comment="检查结果：yes/no")
+    check_comment = Column(Text, nullable=True, comment="检查备注")
+    check_items_result = Column(Text, nullable=True, comment="检查项结果（JSON格式）")
+    checked_at = Column(DateTime(timezone=True), nullable=True, comment="检查时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # 关系
+    task = relationship("SafetyCheckTask", back_populates="task_assets")
+    asset = relationship("Asset")
+    assigned_user = relationship("User", foreign_keys=[assigned_user_id])
+    history_records = relationship("SafetyCheckHistory", back_populates="task_asset")
+    
+    def get_check_items_result(self):
+        """获取检查项结果（解析JSON）"""
+        if self.check_items_result:
+            try:
+                return json.loads(self.check_items_result)
+            except:
+                return []
+        return []
+    
+    def set_check_items_result(self, items):
+        """设置检查项结果（转换为JSON）"""
+        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
+
+
+class SafetyCheckHistory(Base):
+    """安全检查历史记录模型"""
+    __tablename__ = "safety_check_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=False, comment="任务ID")
+    task_asset_id = Column(Integer, ForeignKey("task_assets.id"), nullable=False, comment="任务资产关联ID")
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, comment="资产ID")
+    check_type_id = Column(Integer, ForeignKey("safety_check_types.id"), nullable=False, comment="检查类型ID")
+    checked_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="检查人ID")
+    check_result = Column(String(20), nullable=False, comment="检查结果：yes/no")
+    check_comment = Column(Text, nullable=True, comment="检查备注")
+    check_items_result = Column(Text, nullable=True, comment="检查项结果（JSON格式）")
+    checked_at = Column(DateTime(timezone=True), nullable=False, comment="检查时间")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # 关系
+    task = relationship("SafetyCheckTask")
+    task_asset = relationship("TaskAsset", back_populates="history_records")
+    asset = relationship("Asset")
+    check_type = relationship("SafetyCheckType")
+    checked_by = relationship("User", foreign_keys=[checked_by_id])
+    
+    def get_check_items_result(self):
+        """获取检查项结果（解析JSON）"""
+        if self.check_items_result:
+            try:
+                return json.loads(self.check_items_result)
+            except:
+                return []
+        return []

@@ -10,7 +10,9 @@ import {
   CheckCircleOutlined,
   LogoutOutlined,
   MenuFoldOutlined,
-  MenuUnfoldOutlined
+  MenuUnfoldOutlined,
+  SafetyOutlined,
+  FileTextOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
@@ -102,6 +104,24 @@ const Layout = () => {
         key: '/approvals',
         icon: <CheckCircleOutlined />,
         label: renderApprovalLabel()
+      },
+      {
+        key: '/safety-check-types',
+        icon: <SafetyOutlined />,
+        label: '检查类型管理'
+      },
+      {
+        key: '/safety-check-tasks',
+        icon: <FileTextOutlined />,
+        label: '安全检查任务'
+      }
+    )
+  } else {
+    menuItems.push(
+      {
+        key: '/my-safety-check-tasks',
+        icon: <CheckCircleOutlined />,
+        label: '我的检查任务'
       }
     )
   }

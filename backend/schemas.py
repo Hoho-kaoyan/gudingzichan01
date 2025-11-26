@@ -250,3 +250,133 @@ class AssetEditRequestResponse(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# 安全检查相关模式
+class CheckItem(BaseModel):
+    """检查项"""
+    item: str = Field(..., description="检查项内容")
+    required: bool = Field(default=False, description="是否必填")
+
+
+class SafetyCheckTypeBase(BaseModel):
+    name: str = Field(..., description="检查类型名称")
+    description: Optional[str] = Field(None, description="检查类型描述")
+    check_items: Optional[List[CheckItem]] = Field(None, description="检查项列表")
+    is_active: bool = Field(default=True, description="是否启用")
+
+
+class SafetyCheckTypeCreate(SafetyCheckTypeBase):
+    pass
+
+
+class SafetyCheckTypeUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    check_items: Optional[List[CheckItem]] = None
+    is_active: Optional[bool] = None
+
+
+class SafetyCheckTypeResponse(SafetyCheckTypeBase):
+    id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    created_by_id: Optional[int] = None
+    created_by: Optional[UserResponse] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class SafetyCheckTaskCreate(BaseModel):
+    check_type_id: int = Field(..., description="检查类型ID")
+    title: str = Field(..., description="任务标题")
+    description: Optional[str] = Field(None, description="任务描述")
+    asset_ids: List[int] = Field(..., description="资产ID列表")
+    deadline: Optional[datetime] = Field(None, description="截止时间")
+
+
+class SafetyCheckTaskUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    deadline: Optional[datetime] = None
+    status: Optional[str] = None
+
+
+class SafetyCheckTaskResponse(BaseModel):
+    id: int
+    task_number: str
+    check_type_id: int
+    title: str
+    description: Optional[str] = None
+    deadline: Optional[datetime] = None
+    status: str
+    created_by_id: int
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    check_type: Optional[SafetyCheckTypeResponse] = None
+    created_by: Optional[UserResponse] = None
+    total_assets: Optional[int] = None  # 总资产数
+    completed_assets: Optional[int] = None  # 已完成资产数
+    pending_assets: Optional[int] = None  # 待检查资产数
+    my_assets_count: Optional[int] = None  # 当前用户的资产数（普通用户）
+    my_completed_count: Optional[int] = None  # 当前用户已完成的资产数
+    
+    class Config:
+        from_attributes = True
+
+
+class TaskAssetResponse(BaseModel):
+    id: int
+    task_id: int
+    asset_id: int
+    assigned_user_id: int
+    status: str
+    check_result: Optional[str] = None
+    check_comment: Optional[str] = None
+    check_items_result: Optional[List[dict]] = None
+    checked_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    asset: Optional[AssetResponse] = None
+    assigned_user: Optional[UserResponse] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class CheckItemResult(BaseModel):
+    """检查项结果"""
+    item: str = Field(..., description="检查项内容")
+    result: str = Field(..., description="检查结果：yes/no")
+    comment: Optional[str] = Field(None, description="备注")
+
+
+class SafetyCheckResultSubmit(BaseModel):
+    """提交检查结果"""
+    task_asset_id: int = Field(..., description="任务资产关联ID")
+    check_result: str = Field(..., description="整体检查结果：yes/no")
+    check_comment: Optional[str] = Field(None, description="检查备注")
+    check_items_result: List[CheckItemResult] = Field(..., description="检查项结果列表")
+
+
+class SafetyCheckHistoryResponse(BaseModel):
+    id: int
+    task_id: int
+    task_asset_id: int
+    asset_id: int
+    check_type_id: int
+    checked_by_id: int
+    check_result: str
+    check_comment: Optional[str] = None
+    check_items_result: Optional[List[dict]] = None
+    checked_at: datetime
+    created_at: datetime
+    task_number: Optional[str] = None
+    check_type: Optional[SafetyCheckTypeResponse] = None
+    asset: Optional[AssetResponse] = None
+    checked_by: Optional[UserResponse] = None
+    
+    class Config:
+        from_attributes = True

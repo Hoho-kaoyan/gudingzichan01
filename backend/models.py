@@ -261,7 +261,7 @@ class TaskAsset(Base):
     task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=False, comment="任务ID")
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, comment="资产ID")
     assigned_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="分配用户ID（资产使用人）")
-    status = Column(String(20), default="pending", nullable=False, comment="检查状态：pending/checked/overdue")
+    status = Column(String(20), default="pending", nullable=False, comment="检查状态：pending/checked/overdue/returned")
     check_result = Column(String(20), nullable=True, comment="检查结果：yes/no")
     check_comment = Column(Text, nullable=True, comment="检查备注")
     check_items_result = Column(Text, nullable=True, comment="检查项结果（JSON格式）")
@@ -284,6 +284,14 @@ class TaskAsset(Base):
                 return []
         return []
     
+    def set_check_items_result(self, items):
+        """设置检查项结果（转换为JSON）"""
+        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
+
+    def set_check_items_result(self, items):
+        """设置检查项结果（转换为JSON）"""
+        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
+
     def set_check_items_result(self, items):
         """设置检查项结果（转换为JSON）"""
         self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
@@ -320,3 +328,7 @@ class SafetyCheckHistory(Base):
             except:
                 return []
         return []
+    
+    def set_check_items_result(self, items):
+        """设置检查项结果（转换为JSON）"""
+        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None

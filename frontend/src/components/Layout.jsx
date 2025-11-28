@@ -11,7 +11,6 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  SafetyOutlined,
   FileTextOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
@@ -104,11 +103,6 @@ const Layout = () => {
         key: '/approvals',
         icon: <CheckCircleOutlined />,
         label: renderApprovalLabel()
-      },
-      {
-        key: '/safety-check-types',
-        icon: <SafetyOutlined />,
-        label: '检查类型管理'
       },
       {
         key: '/safety-check-tasks',

@@ -41,10 +41,11 @@ async def get_my_tasks(
     
     items = []
     for task in tasks:
-        # 统计当前用户在此任务中的资产数量
+        # 统计当前用户在此任务中的资产数量（排除已退库的）
         my_assets = db.query(TaskAsset).filter(
             TaskAsset.task_id == task.id,
-            TaskAsset.assigned_user_id == current_user.id
+            TaskAsset.assigned_user_id == current_user.id,
+            TaskAsset.status != "returned"  # 排除已退库的资产
         ).all()
         
         pending_count = len([ta for ta in my_assets if ta.status == "pending"])
@@ -97,15 +98,30 @@ async def get_task_assets_for_user(
     if not has_access:
         raise HTTPException(status_code=403, detail="无权访问此任务")
     
-    # 获取分配给当前用户的资产
+    # 获取分配给当前用户的资产（排除已退库的）
     task_assets = db.query(TaskAsset).filter(
         TaskAsset.task_id == task_id,
-        TaskAsset.assigned_user_id == current_user.id
+        TaskAsset.assigned_user_id == current_user.id,
+        TaskAsset.status != "returned"  # 排除已退库的资产
     ).all()
     
     assets = []
     for ta in task_assets:
-        ta_dict = TaskAssetResponse.model_validate(ta).model_dump()
+        # 先手动构建字典，解析 JSON 字符串，避免 Pydantic 验证错误
+        ta_dict = {
+            "id": ta.id,
+            "task_id": ta.task_id,
+            "asset_id": ta.asset_id,
+            "assigned_user_id": ta.assigned_user_id,
+            "status": ta.status,
+            "check_result": ta.check_result,
+            "check_comment": ta.check_comment,
+            "checked_at": ta.checked_at,
+            "created_at": ta.created_at,
+            "updated_at": ta.updated_at,
+            "asset": ta.asset,
+            "assigned_user": ta.assigned_user
+        }
         # 解析检查项结果
         if ta.check_items_result:
             try:
@@ -226,7 +242,8 @@ async def submit_check_result(
     history.set_check_items_result(items_result)
     db.add(history)
     
-    # 检查任务是否全部完成
+    # 检查任务是否全部完成（排除已退库的资产）
+    # 只有当所有非退库的资产都完成时，任务才算完成
     pending_count = db.query(TaskAsset).filter(
         TaskAsset.task_id == task.id,
         TaskAsset.status == "pending"

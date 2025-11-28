@@ -161,6 +161,10 @@ async def create_edit_request(
         if edit_data.edit_data.get("user_id") != asset.user_id:
             raise HTTPException(status_code=403, detail="普通用户不能修改资产使用人")
     
+    # 普通用户不能修改状态
+    if current_user.role != "admin" and edit_data.edit_data.get("status") is not None:
+        raise HTTPException(status_code=403, detail="普通用户不能修改资产状态")
+    
     # 创建编辑申请
     db_request = AssetEditRequest(
         asset_id=edit_data.asset_id,

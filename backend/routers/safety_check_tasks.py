@@ -130,26 +130,47 @@ async def get_tasks(
     tasks = query.order_by(SafetyCheckTask.created_at.desc()).offset((page - 1) * limit).limit(limit).all()
     
     items = []
+    tasks_to_update = []  # 需要更新状态的任务列表
+    
     for task in tasks:
         task_dict = SafetyCheckTaskResponse.model_validate(task).model_dump()
         
         # 统计资产数量
         if current_user.role == "admin":
-            # 管理员：显示所有资产统计
-            total_assets = db.query(TaskAsset).filter(TaskAsset.task_id == task.id).count()
+            # 管理员：显示所有资产统计（已退库的资产不纳入进度统计）
             completed_assets = db.query(TaskAsset).filter(
                 TaskAsset.task_id == task.id,
                 TaskAsset.status == "checked"
             ).count()
-            pending_assets = total_assets - completed_assets
+            returned_assets = db.query(TaskAsset).filter(
+                TaskAsset.task_id == task.id,
+                TaskAsset.status == "returned"
+            ).count()
+            pending_assets = db.query(TaskAsset).filter(
+                TaskAsset.task_id == task.id,
+                TaskAsset.status == "pending"
+            ).count()
+            # 总资产数 = 已完成 + 待检查（排除已退库的）
+            total_assets = completed_assets + pending_assets
             task_dict["total_assets"] = total_assets
             task_dict["completed_assets"] = completed_assets
             task_dict["pending_assets"] = pending_assets
+            task_dict["returned_assets"] = returned_assets
+            
+            # 如果进度为100%，标记需要更新任务状态为"已完成"
+            if total_assets > 0 and completed_assets == total_assets and task.status != "completed":
+                tasks_to_update.append(task)
+                task_dict["status"] = "completed"
+                if task.completed_at:
+                    task_dict["completed_at"] = task.completed_at
+                else:
+                    task_dict["completed_at"] = datetime.now()
         else:
-            # 普通用户：显示自己的资产统计
+            # 普通用户：显示自己的资产统计（排除已退库的）
             my_assets = db.query(TaskAsset).filter(
                 TaskAsset.task_id == task.id,
-                TaskAsset.assigned_user_id == current_user.id
+                TaskAsset.assigned_user_id == current_user.id,
+                TaskAsset.status != "returned"  # 排除已退库的资产
             ).all()
             my_assets_count = len(my_assets)
             my_completed_count = len([ta for ta in my_assets if ta.status == "checked"])
@@ -157,6 +178,14 @@ async def get_tasks(
             task_dict["my_completed_count"] = my_completed_count
         
         items.append(SafetyCheckTaskResponse(**task_dict))
+    
+    # 批量更新任务状态
+    if tasks_to_update:
+        for task in tasks_to_update:
+            task.status = "completed"
+            if not task.completed_at:
+                task.completed_at = datetime.now()
+        db.commit()
     
     return {
         "total": total,
@@ -190,19 +219,39 @@ async def get_task_detail(
     
     # 统计资产数量
     if current_user.role == "admin":
-        total_assets = db.query(TaskAsset).filter(TaskAsset.task_id == task_id).count()
+        # 管理员：显示所有资产统计（已退库的资产不纳入进度统计）
         completed_assets = db.query(TaskAsset).filter(
             TaskAsset.task_id == task_id,
             TaskAsset.status == "checked"
         ).count()
-        pending_assets = total_assets - completed_assets
+        returned_assets = db.query(TaskAsset).filter(
+            TaskAsset.task_id == task_id,
+            TaskAsset.status == "returned"
+        ).count()
+        pending_assets = db.query(TaskAsset).filter(
+            TaskAsset.task_id == task_id,
+            TaskAsset.status == "pending"
+        ).count()
+        # 总资产数 = 已完成 + 待检查（排除已退库的）
+        total_assets = completed_assets + pending_assets
         task_dict["total_assets"] = total_assets
         task_dict["completed_assets"] = completed_assets
         task_dict["pending_assets"] = pending_assets
+        task_dict["returned_assets"] = returned_assets
+        
+        # 如果进度为100%，自动更新任务状态为"已完成"
+        if total_assets > 0 and completed_assets == total_assets and task.status != "completed":
+            task.status = "completed"
+            if not task.completed_at:
+                task.completed_at = datetime.now()
+            db.commit()
+            task_dict["status"] = "completed"
+            task_dict["completed_at"] = task.completed_at
     else:
         my_assets = db.query(TaskAsset).filter(
             TaskAsset.task_id == task_id,
-            TaskAsset.assigned_user_id == current_user.id
+            TaskAsset.assigned_user_id == current_user.id,
+            TaskAsset.status != "returned"  # 排除已退库的资产
         ).all()
         my_assets_count = len(my_assets)
         my_completed_count = len([ta for ta in my_assets if ta.status == "checked"])
@@ -223,16 +272,33 @@ async def get_task_assets(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     
-    # 普通用户只能查看分配给自己的资产
+    # 普通用户只能查看分配给自己的资产（排除已退库的）
     query = db.query(TaskAsset).filter(TaskAsset.task_id == task_id)
     if current_user.role != "admin":
-        query = query.filter(TaskAsset.assigned_user_id == current_user.id)
+        query = query.filter(
+            TaskAsset.assigned_user_id == current_user.id,
+            TaskAsset.status != "returned"  # 排除已退库的资产
+        )
     
     task_assets = query.all()
     
     assets = []
     for ta in task_assets:
-        ta_dict = TaskAssetResponse.model_validate(ta).model_dump()
+        # 先手动构建字典，解析 JSON 字符串，避免 Pydantic 验证错误
+        ta_dict = {
+            "id": ta.id,
+            "task_id": ta.task_id,
+            "asset_id": ta.asset_id,
+            "assigned_user_id": ta.assigned_user_id,
+            "status": ta.status,
+            "check_result": ta.check_result,
+            "check_comment": ta.check_comment,
+            "checked_at": ta.checked_at,
+            "created_at": ta.created_at,
+            "updated_at": ta.updated_at,
+            "asset": ta.asset,
+            "assigned_user": ta.assigned_user
+        }
         # 解析检查项结果
         if ta.check_items_result:
             try:

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip } from 'antd'
-import { PlusOutlined, EyeOutlined, CloseOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip, Switch } from 'antd'
+import { PlusOutlined, EyeOutlined, CloseOutlined, SettingOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
@@ -24,6 +24,11 @@ const SafetyCheckTaskManagement = () => {
   const [detailTask, setDetailTask] = useState(null)
   const [detailAssets, setDetailAssets] = useState([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const [typeManagementVisible, setTypeManagementVisible] = useState(false)
+  const [typeManagementLoading, setTypeManagementLoading] = useState(false)
+  const [editingType, setEditingType] = useState(null)
+  const [typeFormModalVisible, setTypeFormModalVisible] = useState(false)
+  const [typeForm] = Form.useForm()
   const [form] = Form.useForm()
   const [filterForm] = Form.useForm()
 
@@ -56,6 +61,78 @@ const SafetyCheckTaskManagement = () => {
       setCheckTypes(activeTypes)
     } catch (error) {
       message.error('获取检查类型失败')
+    }
+  }
+
+  const fetchAllCheckTypes = async () => {
+    setTypeManagementLoading(true)
+    try {
+      const response = await api.get('/safety-check-types/')
+      setCheckTypes(response.data)
+    } catch (error) {
+      message.error('获取检查类型列表失败')
+    } finally {
+      setTypeManagementLoading(false)
+    }
+  }
+
+  const handleOpenTypeManagement = () => {
+    setTypeManagementVisible(true)
+    fetchAllCheckTypes()
+  }
+
+  const handleTypeAdd = () => {
+    setEditingType(null)
+    typeForm.resetFields()
+    typeForm.setFieldsValue({ is_active: true, check_items: [] })
+    setTypeFormModalVisible(true)
+  }
+
+  const handleTypeEdit = (record) => {
+    setEditingType(record)
+    typeForm.setFieldsValue({
+      name: record.name,
+      description: record.description,
+      is_active: record.is_active,
+      check_items: record.check_items || []
+    })
+    setTypeFormModalVisible(true)
+  }
+
+  const handleTypeDelete = async (id) => {
+    try {
+      await api.delete(`/safety-check-types/${id}`)
+      message.success('检查类型已停用')
+      fetchAllCheckTypes()
+      fetchCheckTypes() // 同时更新任务创建时使用的检查类型列表
+    } catch (error) {
+      message.error(error.response?.data?.detail || '操作失败')
+    }
+  }
+
+  const handleTypeSubmit = async (values) => {
+    try {
+      const payload = {
+        name: values.name,
+        description: values.description,
+        is_active: values.is_active,
+        check_items: values.check_items || []
+      }
+
+      if (editingType) {
+        await api.put(`/safety-check-types/${editingType.id}`, payload)
+        message.success('更新成功')
+      } else {
+        await api.post('/safety-check-types/', payload)
+        message.success('创建成功')
+      }
+      typeForm.resetFields()
+      setEditingType(null)
+      setTypeFormModalVisible(false)
+      fetchAllCheckTypes()
+      fetchCheckTypes() // 同时更新任务创建时使用的检查类型列表
+    } catch (error) {
+      message.error(error.response?.data?.detail || '操作失败')
     }
   }
 
@@ -315,9 +392,14 @@ const SafetyCheckTaskManagement = () => {
     <div>
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <h2>安全检查任务管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-          发布新任务
-        </Button>
+        <Space>
+          <Button icon={<SettingOutlined />} onClick={handleOpenTypeManagement}>
+            检查类型管理
+          </Button>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+            发布新任务
+          </Button>
+        </Space>
       </div>
 
       <Table
@@ -525,8 +607,12 @@ const SafetyCheckTaskManagement = () => {
                   <div>已完成</div>
                 </div>
                 <div>
-                  <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>{detailAssets.filter(a => a.status !== 'checked').length}</div>
-                  <div>未完成</div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#faad14' }}>{detailAssets.filter(a => a.status === 'pending').length}</div>
+                  <div>待检查</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 600, color: '#ff4d4f' }}>{detailAssets.filter(a => a.status === 'returned').length}</div>
+                  <div>已退库</div>
                 </div>
               </Space>
             </Card>
@@ -538,7 +624,9 @@ const SafetyCheckTaskManagement = () => {
                   .filter(a => a.status !== 'checked')
                   .map(asset => (
                     <div key={asset.id} style={{ marginBottom: 8 }}>
-                      <Tag color="orange">待检查</Tag>
+                      <Tag color={asset.status === 'returned' ? 'red' : 'orange'}>
+                        {asset.status === 'returned' ? '已退库' : '待检查'}
+                      </Tag>
                       {asset.asset?.asset_number || '-'} - {asset.asset?.name || '-'}（{asset.assigned_user?.real_name || '未知使用人'}）
                     </div>
                   ))
@@ -551,12 +639,58 @@ const SafetyCheckTaskManagement = () => {
                 <div style={{ maxHeight: 300, overflow: 'auto' }}>
                   {detailAssets.map(asset => (
                     <div key={asset.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f0f0f0' }}>
-                      <div>
+                      <div style={{ flex: 1 }}>
                         <div>{asset.asset?.asset_number || '-'} - {asset.asset?.name || '-'}</div>
-                        <div style={{ color: '#888' }}>使用人：{asset.assigned_user?.real_name || '未知'}</div>
+                        <div style={{ color: '#888', fontSize: '12px' }}>使用人：{asset.assigned_user?.real_name || '未知'}</div>
+                        {asset.status === 'checked' && asset.check_result && (
+                          <div style={{ color: '#666', fontSize: '12px', marginTop: '4px' }}>
+                            <div>
+                              检查结果：<span style={{ color: asset.check_result === 'yes' ? '#52c41a' : '#ff4d4f', fontWeight: 500 }}>
+                                {asset.check_result === 'yes' ? '通过' : '不通过'}
+                              </span>
+                              {asset.check_comment && (
+                                <span style={{ marginLeft: '8px' }}>备注：{asset.check_comment}</span>
+                              )}
+                            </div>
+                            {asset.check_items_result && Array.isArray(asset.check_items_result) && asset.check_items_result.length > 0 && (
+                              <div style={{ marginTop: '4px', paddingLeft: '8px' }}>
+                                {asset.check_items_result.map((item, index) => (
+                                  <div key={index} style={{ marginTop: '2px', fontSize: '11px' }}>
+                                    • {item.item}：
+                                    <span style={{ 
+                                      color: item.result === 'yes' ? '#52c41a' : '#ff4d4f', 
+                                      fontWeight: 500,
+                                      marginLeft: '4px'
+                                    }}>
+                                      {item.result === 'yes' ? '通过' : '不通过'}
+                                    </span>
+                                    {item.comment && (
+                                      <span style={{ color: '#999', marginLeft: '8px' }}>（{item.comment}）</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-                      <Tag color={asset.status === 'checked' ? 'green' : 'orange'}>
-                        {asset.status === 'checked' ? '已完成' : '待检查'}
+                      <Tag 
+                        color={
+                          asset.status === 'checked' ? 'green' : 
+                          asset.status === 'returned' ? 'red' : 
+                          'orange'
+                        }
+                        style={{ 
+                          textAlign: 'center',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: '60px'
+                        }}
+                      >
+                        {asset.status === 'checked' ? '已完成' : 
+                         asset.status === 'returned' ? '已退库' : 
+                         '待检查'}
                       </Tag>
                     </div>
                   ))}
@@ -567,6 +701,183 @@ const SafetyCheckTaskManagement = () => {
         ) : (
           <div style={{ textAlign: 'center', padding: 40 }}>暂无数据</div>
         )}
+      </Modal>
+
+      {/* 检查类型管理模态框 */}
+      <Modal
+        title="检查类型管理"
+        open={typeManagementVisible}
+        onCancel={() => {
+          setTypeManagementVisible(false)
+          setEditingType(null)
+          typeForm.resetFields()
+        }}
+        width={1000}
+        footer={null}
+        destroyOnClose
+      >
+        <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
+          <div></div>
+          <Button type="primary" icon={<PlusOutlined />} onClick={handleTypeAdd}>
+            新增检查类型
+          </Button>
+        </div>
+
+        <Table
+          columns={[
+            {
+              title: '类型名称',
+              dataIndex: 'name',
+              key: 'name',
+              width: 200
+            },
+            {
+              title: '描述',
+              dataIndex: 'description',
+              key: 'description',
+              ellipsis: true
+            },
+            {
+              title: '检查项数量',
+              key: 'check_items_count',
+              width: 120,
+              render: (_, record) => {
+                return record.check_items?.length || 0
+              }
+            },
+            {
+              title: '状态',
+              dataIndex: 'is_active',
+              key: 'is_active',
+              width: 100,
+              render: (isActive) => (
+                <span style={{ color: isActive ? '#52c41a' : '#999' }}>
+                  {isActive ? '启用' : '停用'}
+                </span>
+              )
+            },
+            {
+              title: '操作',
+              key: 'action',
+              width: 150,
+              fixed: 'right',
+              render: (_, record) => (
+                <Space>
+                  <Button
+                    type="link"
+                    icon={<EditOutlined />}
+                    onClick={() => handleTypeEdit(record)}
+                  >
+                    编辑
+                  </Button>
+                  <Popconfirm
+                    title="确定要停用此检查类型吗？"
+                    onConfirm={() => handleTypeDelete(record.id)}
+                    okText="确定"
+                    cancelText="取消"
+                  >
+                    <Button type="link" danger icon={<DeleteOutlined />}>
+                      停用
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              )
+            }
+          ]}
+          dataSource={checkTypes}
+          rowKey="id"
+          loading={typeManagementLoading}
+          scroll={{ x: 1000 }}
+        />
+
+        {/* 编辑/新增检查类型表单模态框 */}
+        <Modal
+          title={editingType ? '编辑检查类型' : '新增检查类型'}
+          open={typeFormModalVisible}
+          onCancel={() => {
+            setEditingType(null)
+            setTypeFormModalVisible(false)
+            typeForm.resetFields()
+          }}
+          onOk={() => typeForm.submit()}
+          width={800}
+          destroyOnClose
+        >
+          <Form
+            form={typeForm}
+            layout="vertical"
+            onFinish={handleTypeSubmit}
+          >
+            <Form.Item
+              name="name"
+              label="类型名称"
+              rules={[{ required: true, message: '请输入类型名称' }]}
+            >
+              <Input placeholder="例如：消防安全检查" />
+            </Form.Item>
+
+            <Form.Item
+              name="description"
+              label="描述"
+            >
+              <TextArea rows={3} placeholder="检查类型描述（可选）" />
+            </Form.Item>
+
+            <Form.Item
+              name="is_active"
+              label="状态"
+              valuePropName="checked"
+            >
+              <Switch checkedChildren="启用" unCheckedChildren="停用" />
+            </Form.Item>
+
+            <Form.Item
+              name="check_items"
+              label="检查项列表"
+            >
+              <Form.List name="check_items">
+                {(fields, { add, remove }) => (
+                  <>
+                    {fields.map(({ key, name, ...restField }) => (
+                      <div key={key} style={{ marginBottom: 16, padding: 16, border: '1px solid #d9d9d9', borderRadius: 4 }}>
+                        <Space direction="vertical" style={{ width: '100%' }}>
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'item']}
+                            label="检查项内容"
+                            rules={[{ required: true, message: '请输入检查项内容' }]}
+                            style={{ marginBottom: 8 }}
+                          >
+                            <Input placeholder="例如：灭火器是否在有效期内" />
+                          </Form.Item>
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'required']}
+                            valuePropName="checked"
+                            style={{ marginBottom: 0 }}
+                          >
+                            <Switch checkedChildren="必填" unCheckedChildren="可选" />
+                          </Form.Item>
+                          <Button
+                            type="link"
+                            danger
+                            onClick={() => remove(name)}
+                            style={{ padding: 0 }}
+                          >
+                            删除
+                          </Button>
+                        </Space>
+                      </div>
+                    ))}
+                    <Button type="dashed" onClick={() => add()} block>
+                      添加检查项
+                    </Button>
+                  </>
+                )}
+              </Form.List>
+            </Form.Item>
+          </Form>
+        </Modal>
       </Modal>
     </div>
   )

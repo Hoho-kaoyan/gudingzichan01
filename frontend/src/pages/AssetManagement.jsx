@@ -120,6 +120,10 @@ const AssetManagement = () => {
       // 普通用户创建/编辑资产时强制绑定到自己
       if (!isAdmin && currentUser) {
         values.user_id = currentUser.id
+        // 普通用户不能修改状态，移除status字段
+        if (values.status) {
+          delete values.status
+        }
       }
       if (editingAsset) {
         try {
@@ -143,6 +147,10 @@ const AssetManagement = () => {
           throw error
         }
       } else {
+        // 新增资产时，普通用户不能设置状态
+        if (!isAdmin && values.status) {
+          delete values.status
+        }
         await api.post('/assets/', values)
         message.success('创建成功')
       }
@@ -488,16 +496,18 @@ const AssetManagement = () => {
           >
             <Input />
           </Form.Item>
-          <Form.Item
-            label="状态"
-            name="status"
-            rules={[{ required: true, message: '请选择状态' }]}
-          >
-            <Select>
-              <Select.Option value="在用">在用</Select.Option>
-              <Select.Option value="库存备用">库存备用</Select.Option>
-            </Select>
-          </Form.Item>
+          {isAdmin && (
+            <Form.Item
+              label="状态"
+              name="status"
+              rules={[{ required: true, message: '请选择状态' }]}
+            >
+              <Select>
+                <Select.Option value="在用">在用</Select.Option>
+                <Select.Option value="库存备用">库存备用</Select.Option>
+              </Select>
+            </Form.Item>
+          )}
           <Form.Item
             label="MAC地址"
             name="mac_address"

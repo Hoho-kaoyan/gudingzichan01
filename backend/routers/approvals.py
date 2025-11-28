@@ -5,7 +5,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from models import TransferRequest, ReturnRequest, AssetEditRequest, Asset, User
+from models import TransferRequest, ReturnRequest, AssetEditRequest, Asset, User, TaskAsset
 from schemas import ApprovalRequest
 from auth import get_current_admin_user
 from logger import logger
@@ -66,6 +66,16 @@ async def approve_request(
                 
                 # 获取转出用户信息
                 from_user = db.query(User).filter(User.id == request.from_user_id).first()
+                
+                # 更新该资产未完成的安全检查任务到新接收人
+                pending_task_assets = db.query(TaskAsset).filter(
+                    TaskAsset.asset_id == asset.id,
+                    TaskAsset.status == "pending"
+                ).all()
+                
+                for task_asset in pending_task_assets:
+                    task_asset.assigned_user_id = request.to_user_id
+                    logger.info(f"资产交接：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {to_user.real_name if to_user else ''}")
                 
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}, 申请ID {request.id}")
                 
@@ -215,6 +225,16 @@ async def approve_request(
                     asset.status = "库存备用"
                     # 其他字段保持不变
                 
+                # 将该资产未完成的安全检查任务标记为已退库
+                pending_task_assets = db.query(TaskAsset).filter(
+                    TaskAsset.asset_id == asset.id,
+                    TaskAsset.status == "pending"
+                ).all()
+                
+                for task_asset in pending_task_assets:
+                    task_asset.status = "returned"  # 标记为已退库
+                    logger.info(f"资产退回：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
+                
                 # 记录审批通过历史
                 new_user_obj = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产退回申请: 资产ID {asset.id}({asset.asset_number}), 申请ID {request.id}")
@@ -329,10 +349,35 @@ async def approve_request(
                         changed_fields.append(field)
                 
                 # 如果更新了使用人，自动更新组别
+                old_user_id = old_values.get("user_id")
                 if "user_id" in edit_data and edit_data["user_id"] is not None:
                     user = db.query(User).filter(User.id == edit_data["user_id"]).first()
                     if user:
                         asset.user_group = user.group
+                
+                # 处理安全检查任务
+                # 如果修改了使用人，更新未完成的安全检查任务到新接收人
+                if "user_id" in changed_fields and edit_data.get("user_id") is not None and edit_data.get("user_id") != old_user_id:
+                    pending_task_assets = db.query(TaskAsset).filter(
+                        TaskAsset.asset_id == asset.id,
+                        TaskAsset.status == "pending"
+                    ).all()
+                    
+                    new_user = db.query(User).filter(User.id == edit_data["user_id"]).first()
+                    for task_asset in pending_task_assets:
+                        task_asset.assigned_user_id = edit_data["user_id"]
+                        logger.info(f"资产编辑审批：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {new_user.real_name if new_user else ''}")
+                
+                # 如果状态改为"库存备用"，将未完成的安全检查任务标记为已退库
+                if "status" in changed_fields and asset.status == "库存备用":
+                    pending_task_assets = db.query(TaskAsset).filter(
+                        TaskAsset.asset_id == asset.id,
+                        TaskAsset.status == "pending"
+                    ).all()
+                    
+                    for task_asset in pending_task_assets:
+                        task_asset.status = "returned"  # 标记为已退库
+                        logger.info(f"资产编辑审批：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
                 
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产编辑申请: 资产ID {asset.id}({asset.asset_number}), 修改字段: {', '.join(changed_fields) if changed_fields else '无'}, 申请ID {request.id}")
                 

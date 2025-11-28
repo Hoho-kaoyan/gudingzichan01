@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import Asset, AssetCategory, User
+from models import Asset, AssetCategory, User, TaskAsset
 from schemas import AssetCreate, AssetUpdate, AssetResponse, ImportResponse
 from auth import get_current_user
 import pandas as pd
@@ -182,10 +182,14 @@ async def create_asset(
     
     asset_dict = asset_data.dict()
 
-    # 如果是普通用户，强制将资产归属到自己
+    # 如果是普通用户，强制将资产归属到自己，并设置默认状态
     if current_user.role != "admin":
         asset_dict["user_id"] = current_user.id
         asset_dict["user_group"] = current_user.group
+        # 普通用户不能设置状态，默认设置为"在用"
+        if "status" in asset_dict:
+            del asset_dict["status"]  # 移除用户提交的状态
+        asset_dict["status"] = "在用"  # 默认设置为"在用"
     else:
         # 管理员创建时，如指定了使用人则检查
         user_id = asset_dict.get("user_id")
@@ -257,8 +261,10 @@ async def update_asset(
         import json
         from models import AssetEditRequest
         
-        # 构建编辑数据
+        # 构建编辑数据（排除状态字段，普通用户不能修改状态）
         update_data = asset_data.dict(exclude_unset=True)
+        if "status" in update_data:
+            del update_data["status"]  # 移除状态字段
         
         # 创建编辑申请
         db_request = AssetEditRequest(
@@ -337,10 +343,35 @@ async def update_asset(
             changed_fields.append(field)
     
     # 如果更新了使用人，自动更新组别
+    old_user_id = old_values.get("user_id")
     if asset_data.user_id is not None:
         user = db.query(User).filter(User.id == asset_data.user_id).first()
         if user:
             asset.user_group = user.group
+    
+    # 处理安全检查任务
+    # 如果修改了使用人，更新未完成的安全检查任务到新接收人
+    if "user_id" in changed_fields and asset_data.user_id is not None and asset_data.user_id != old_user_id:
+        pending_task_assets = db.query(TaskAsset).filter(
+            TaskAsset.asset_id == asset.id,
+            TaskAsset.status == "pending"
+        ).all()
+        
+        new_user = db.query(User).filter(User.id == asset_data.user_id).first()
+        for task_asset in pending_task_assets:
+            task_asset.assigned_user_id = asset_data.user_id
+            logger.info(f"资产编辑：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {new_user.real_name if new_user else ''}")
+    
+    # 如果状态改为"库存备用"，将未完成的安全检查任务标记为已退库
+    if "status" in changed_fields and asset.status == "库存备用":
+        pending_task_assets = db.query(TaskAsset).filter(
+            TaskAsset.asset_id == asset.id,
+            TaskAsset.status == "pending"
+        ).all()
+        
+        for task_asset in pending_task_assets:
+            task_asset.status = "returned"  # 标记为已退库
+            logger.info(f"资产编辑：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
     
     # 记录编辑历史
     if changed_fields:

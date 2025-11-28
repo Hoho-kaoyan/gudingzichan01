@@ -9,6 +9,8 @@ const ApprovalManagement = () => {
   const [transfers, setTransfers] = useState([])
   const [returns, setReturns] = useState([])
   const [edits, setEdits] = useState([])
+  const [categories, setCategories] = useState([])
+  const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const [approvalModalVisible, setApprovalModalVisible] = useState(false)
   const [currentRequest, setCurrentRequest] = useState(null)
@@ -19,6 +21,8 @@ const ApprovalManagement = () => {
     fetchTransfers()
     fetchReturns()
     fetchEdits()
+    fetchCategories()
+    fetchUsers()
   }, [])
 
   const fetchTransfers = async () => {
@@ -54,6 +58,24 @@ const ApprovalManagement = () => {
       message.error('获取编辑申请列表失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get('/categories/')
+      setCategories(response.data)
+    } catch (error) {
+      console.error('获取资产大类失败:', error)
+    }
+  }
+
+  const fetchUsers = async () => {
+    try {
+      const response = await api.get('/users/')
+      setUsers(response.data)
+    } catch (error) {
+      console.error('获取用户列表失败:', error)
     }
   }
 
@@ -337,6 +359,7 @@ const ApprovalManagement = () => {
                     <>
                       {Object.entries(currentRequest.edit_data).map(([key, value]) => {
                         const labelMap = {
+                          category_id: '所属大类',
                           name: '实物名称',
                           specification: '规格型号',
                           status: '状态',
@@ -345,11 +368,30 @@ const ApprovalManagement = () => {
                           office_location: '存放地点',
                           floor: '存放楼层',
                           seat_number: '座位号',
+                          user_id: '使用人',
+                          user_group: '使用人组别',
                           remark: '备注说明'
                         }
+                        
+                        // 处理特殊字段的显示值
+                        let displayValue = value
+                        if (key === 'category_id' && value) {
+                          // 查找类别名称
+                          const category = categories.find(cat => cat.id === value)
+                          displayValue = category ? category.name : value
+                        } else if (key === 'user_id' && value) {
+                          // 查找用户名称
+                          const user = users.find(u => u.id === value)
+                          displayValue = user ? `${user.real_name} (${user.ehr_number})` : value
+                        } else if (value === null || value === '') {
+                          displayValue = '(清空)'
+                        } else {
+                          displayValue = String(value)
+                        }
+                        
                         return (
                           <Descriptions.Item key={key} label={labelMap[key] || key} span={key === 'remark' ? 2 : 1}>
-                            {value === null || value === '' ? '(清空)' : String(value)}
+                            {displayValue}
                           </Descriptions.Item>
                         )
                       })}

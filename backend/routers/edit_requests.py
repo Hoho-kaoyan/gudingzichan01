@@ -100,6 +100,49 @@ async def get_edit_requests(
     return result
 
 
+@router.delete("/{request_id}")
+async def cancel_edit_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """撤回资产编辑申请（仅申请人可以撤回,且只能撤回待审批状态的申请）"""
+    request = db.query(AssetEditRequest).filter(AssetEditRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="编辑申请不存在")
+    
+    # 检查申请状态,只能撤回待审批的申请
+    if request.status != "pending":
+        raise HTTPException(status_code=400, detail="只能撤回待审批状态的申请")
+    
+    # 检查权限：只有申请人可以撤回（管理员也可以）
+    if current_user.role != "admin" and request.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="只有申请人可以撤回申请")
+    
+    asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+    logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 撤回资产编辑申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+    
+    # 记录撤回历史
+    try:
+        create_history = get_create_history_record()
+        create_history(
+            db=db,
+            asset_id=request.asset_id,
+            action_type="edit",
+            action_description="撤回资产编辑申请",
+            operator_id=current_user.id,
+            related_request_id=request.id,
+            related_request_type="edit"
+        )
+    except Exception as e:
+        logger.error(f"记录撤回历史失败: {e}", exc_info=True)
+    
+    # 删除申请
+    db.delete(request)
+    db.commit()
+    return {"message": "申请已撤回"}
+
+
 @router.get("/{request_id}", response_model=AssetEditRequestResponse)
 async def get_edit_request(
     request_id: int,
@@ -165,11 +208,49 @@ async def create_edit_request(
     if current_user.role != "admin" and edit_data.edit_data.get("status") is not None:
         raise HTTPException(status_code=403, detail="普通用户不能修改资产状态")
     
-    # 创建编辑申请
+    # 检查是否已有待审批的编辑申请
+    existing_request = db.query(AssetEditRequest).filter(
+        AssetEditRequest.asset_id == edit_data.asset_id,
+        AssetEditRequest.status == "pending"
+    ).first()
+    if existing_request:
+        raise HTTPException(status_code=400, detail="该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请")
+    
+    # 记录旧值（包含所有可能修改的字段）
+    old_values = {
+        "category_id": asset.category_id,
+        "name": asset.name,
+        "specification": asset.specification,
+        "status": asset.status,
+        "mac_address": asset.mac_address,
+        "ip_address": asset.ip_address,
+        "office_location": asset.office_location,
+        "floor": asset.floor,
+        "seat_number": asset.seat_number,
+        "user_id": asset.user_id,
+        "user_group": asset.user_group,
+        "remark": asset.remark
+    }
+    
+    # 只保留真正有变化的字段
+    changed_fields = {}
+    for k, v in edit_data.edit_data.items():
+        old_val = old_values.get(k)
+        # 处理空值比较：None、空字符串、空值都视为相同
+        old_val_normalized = old_val if old_val is not None and old_val != "" else None
+        new_val_normalized = v if v is not None and v != "" else None
+        if old_val_normalized != new_val_normalized:
+            changed_fields[k] = v
+    
+    # 如果没有字段变化，不允许创建编辑申请
+    if not changed_fields:
+        raise HTTPException(status_code=400, detail="没有字段发生变化，无需提交编辑申请")
+    
+    # 创建编辑申请（只存储有变化的字段）
     db_request = AssetEditRequest(
         asset_id=edit_data.asset_id,
         user_id=current_user.id,
-        edit_data=json.dumps(edit_data.edit_data, ensure_ascii=False),
+        edit_data=json.dumps(changed_fields, ensure_ascii=False),
         status="pending"
     )
     db.add(db_request)
@@ -178,22 +259,6 @@ async def create_edit_request(
     # 记录编辑申请历史
     try:
         create_history = get_create_history_record()
-        # 记录旧值
-        old_values = {
-            "name": asset.name,
-            "specification": asset.specification,
-            "status": asset.status,
-            "mac_address": asset.mac_address,
-            "ip_address": asset.ip_address,
-            "office_location": asset.office_location,
-            "floor": asset.floor,
-            "seat_number": asset.seat_number,
-            "user_id": asset.user_id,
-            "user_group": asset.user_group,
-            "remark": asset.remark
-        }
-        # 只记录有变化的字段
-        changed_fields = {k: v for k, v in edit_data.edit_data.items() if old_values.get(k) != v}
         # 导入字段名映射函数
         from routers.asset_history import get_field_label
         field_labels = [get_field_label(field) for field in changed_fields.keys()]

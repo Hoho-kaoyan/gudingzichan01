@@ -261,16 +261,54 @@ async def update_asset(
         import json
         from models import AssetEditRequest
         
+        # 检查是否已有待审批的编辑申请
+        existing_request = db.query(AssetEditRequest).filter(
+            AssetEditRequest.asset_id == asset_id,
+            AssetEditRequest.status == "pending"
+        ).first()
+        if existing_request:
+            raise HTTPException(status_code=400, detail="该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请")
+        
         # 构建编辑数据（排除状态字段，普通用户不能修改状态）
         update_data = asset_data.dict(exclude_unset=True)
         if "status" in update_data:
             del update_data["status"]  # 移除状态字段
         
-        # 创建编辑申请
+        # 记录旧值（包含所有可能修改的字段）
+        old_values = {
+            "category_id": asset.category_id,
+            "name": asset.name,
+            "specification": asset.specification,
+            "status": asset.status,
+            "mac_address": asset.mac_address,
+            "ip_address": asset.ip_address,
+            "office_location": asset.office_location,
+            "floor": asset.floor,
+            "seat_number": asset.seat_number,
+            "user_id": asset.user_id,
+            "user_group": asset.user_group,
+            "remark": asset.remark
+        }
+        
+        # 只保留真正有变化的字段
+        changed_fields = {}
+        for k, v in update_data.items():
+            old_val = old_values.get(k)
+            # 处理空值比较：None、空字符串、空值都视为相同
+            old_val_normalized = old_val if old_val is not None and old_val != "" else None
+            new_val_normalized = v if v is not None and v != "" else None
+            if old_val_normalized != new_val_normalized:
+                changed_fields[k] = v
+        
+        # 如果没有字段变化，不允许创建编辑申请
+        if not changed_fields:
+            raise HTTPException(status_code=400, detail="没有字段发生变化，无需提交编辑申请")
+        
+        # 创建编辑申请（只存储有变化的字段）
         db_request = AssetEditRequest(
             asset_id=asset_id,
             user_id=current_user.id,
-            edit_data=json.dumps(update_data, ensure_ascii=False),
+            edit_data=json.dumps(changed_fields, ensure_ascii=False),
             status="pending"
         )
         db.add(db_request)
@@ -279,20 +317,6 @@ async def update_asset(
         # 记录编辑申请历史
         try:
             create_history = get_create_history_record()
-            old_values = {
-                "name": asset.name,
-                "specification": asset.specification,
-                "status": asset.status,
-                "mac_address": asset.mac_address,
-                "ip_address": asset.ip_address,
-                "office_location": asset.office_location,
-                "floor": asset.floor,
-                "seat_number": asset.seat_number,
-                "user_id": asset.user_id,
-                "user_group": asset.user_group,
-                "remark": asset.remark
-            }
-            changed_fields = {k: v for k, v in update_data.items() if old_values.get(k) != v}
             # 导入字段名映射函数
             from routers.asset_history import get_field_label
             field_labels = [get_field_label(field) for field in changed_fields.keys()]

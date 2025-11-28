@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider, Alert } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined, FileTextOutlined, CloseCircleOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -26,6 +26,8 @@ const AssetManagement = () => {
   const [currentEditRequest, setCurrentEditRequest] = useState(null)
   const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
   const [importErrors, setImportErrors] = useState([])
+  const [assetDetailModalVisible, setAssetDetailModalVisible] = useState(false)
+  const [currentAssetDetail, setCurrentAssetDetail] = useState(null)
 
   useEffect(() => {
     if (currentUser) {
@@ -115,6 +117,14 @@ const AssetManagement = () => {
       message.error('只能编辑自己名下的资产')
       return
     }
+    // 检查是否有待审批的编辑申请
+    if (!isAdmin) {
+      const request = getAssetEditRequest(record.id)
+      if (request && request.status === 'pending') {
+        message.warning('该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请')
+        return
+      }
+    }
     setEditingAsset(record)
     form.setFieldsValue({
       ...record,
@@ -150,6 +160,13 @@ const AssetManagement = () => {
           // 检查是否是编辑申请（普通用户提交申请）
           if (response.data && response.data.message && response.data.message.includes('编辑申请已提交')) {
             message.success('编辑申请已提交，等待管理员审批')
+            setModalVisible(false)
+            fetchAssets()
+            // 刷新编辑申请列表
+            if (!isAdmin) {
+              await fetchEditRequests()
+            }
+            return
           } else {
             message.success('更新成功')
           }
@@ -162,7 +179,7 @@ const AssetManagement = () => {
               fetchAssets()
               // 刷新编辑申请列表
               if (!isAdmin) {
-                fetchEditRequests()
+                await fetchEditRequests()
               }
               return
             }
@@ -258,7 +275,9 @@ const AssetManagement = () => {
 
   // 获取资产的编辑申请状态
   const getAssetEditRequest = (assetId) => {
-    return editRequests.find(req => req.asset_id === assetId)
+    // 确保类型一致，使用 Number 转换进行比较
+    const id = Number(assetId)
+    return editRequests.find(req => Number(req.asset_id) === id)
   }
 
   // 查看编辑申请详情
@@ -274,6 +293,26 @@ const AssetManagement = () => {
         message.error('获取编辑申请详情失败')
       }
     }
+  }
+
+  // 撤回编辑申请
+  const handleCancelEditRequest = async (requestId, assetId) => {
+    try {
+      await api.delete(`/edit-requests/${requestId}`)
+      message.success('编辑申请已撤回')
+      // 刷新编辑申请列表
+      await fetchEditRequests()
+      // 刷新资产列表
+      fetchAssets()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '撤回失败')
+    }
+  }
+
+  // 查看资产详情
+  const handleViewAssetDetail = (record) => {
+    setCurrentAssetDetail(record)
+    setAssetDetailModalVisible(true)
   }
 
   // 定义列配置
@@ -322,32 +361,6 @@ const AssetManagement = () => {
       dataIndex: 'user_group',
       key: 'user_group',
       width: 80
-    },
-    {
-      title: '存放地点',
-      dataIndex: 'office_location',
-      key: 'office_location',
-      width: 90,
-      ellipsis: true
-    },
-    {
-      title: '存放楼层',
-      dataIndex: 'floor',
-      key: 'floor',
-      width: 65
-    },
-    {
-      title: '座位号',
-      dataIndex: 'seat_number',
-      key: 'seat_number',
-      width: 65
-    },
-    {
-      title: '备注说明',
-      dataIndex: 'remark',
-      key: 'remark',
-      width: 90,
-      ellipsis: true
     }
     ]
 
@@ -356,7 +369,7 @@ const AssetManagement = () => {
       baseColumns.push({
         title: '编辑申请',
         key: 'edit_request',
-        width: 100,
+        width: 120,
         render: (_, record) => {
           const request = getAssetEditRequest(record.id)
           if (request) {
@@ -372,15 +385,33 @@ const AssetManagement = () => {
             return (
               <Space size="small" direction="vertical">
                 <Tag color={statusColor}>{statusText}</Tag>
-                <Button
-                  type="link"
-                  icon={<FileTextOutlined />}
-                  onClick={() => handleViewEditRequest(record.id)}
-                  size="small"
-                  style={{ padding: 0, fontSize: '12px' }}
-                >
-                  查看详情
-                </Button>
+                <Space size="small">
+                  <Button
+                    type="link"
+                    icon={<FileTextOutlined />}
+                    onClick={() => handleViewEditRequest(record.id)}
+                    size="small"
+                    style={{ padding: 0 }}
+                    title="查看详情"
+                  />
+                  {request.status === 'pending' && (
+                    <Popconfirm
+                      title="确定要撤回此编辑申请吗？"
+                      onConfirm={() => handleCancelEditRequest(request.id, record.id)}
+                      okText="确定"
+                      cancelText="取消"
+                    >
+                      <Button
+                        type="link"
+                        icon={<CloseCircleOutlined />}
+                        size="small"
+                        danger
+                        style={{ padding: 0 }}
+                        title="撤回"
+                      />
+                    </Popconfirm>
+                  )}
+                </Space>
               </Space>
             )
           }
@@ -392,35 +423,44 @@ const AssetManagement = () => {
     baseColumns.push({
       title: '操作',
       key: 'action',
-      width: 150,
+      width: 100,
       fixed: 'right',
       resizable: false, // 操作列不需要调整宽度
       render: (_, record) => {
         // 普通用户只能编辑自己名下的资产，不能删除
         const canEdit = isAdmin || record.user?.id === currentUser?.id
         const canDelete = isAdmin
+        // 检查是否有待审批的编辑申请（仅普通用户）
+        const hasPendingRequest = !isAdmin && getAssetEditRequest(record.id)?.status === 'pending'
         
         return (
           <Space size="small">
             <Button 
               type="link" 
+              icon={<EyeOutlined />} 
+              onClick={() => handleViewAssetDetail(record)}
+              size="small"
+              style={{ padding: 0, color: '#ff9800' }}
+              title="查看详情"
+            />
+            <Button 
+              type="link" 
               icon={<HistoryOutlined />} 
               onClick={() => navigate(`/assets/${record.id}/history`)}
               size="small"
-              style={{ padding: 0 }}
-            >
-              流转记录
-            </Button>
+              style={{ padding: 0, color: '#ff9800' }}
+              title="流转记录"
+            />
             {canEdit && (
               <Button 
                 type="link" 
                 icon={<EditOutlined />} 
                 onClick={() => handleEdit(record)} 
+                disabled={hasPendingRequest}
+                title={hasPendingRequest ? '该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请' : '编辑'}
                 size="small"
-                style={{ padding: 0 }}
-              >
-                编辑
-              </Button>
+                style={{ padding: 0, color: hasPendingRequest ? undefined : '#ff9800' }}
+              />
             )}
             {canDelete && (
               <Popconfirm
@@ -433,9 +473,8 @@ const AssetManagement = () => {
                   icon={<DeleteOutlined />} 
                   size="small"
                   style={{ padding: 0 }}
-                >
-                  删除
-                </Button>
+                  title="删除"
+                />
               </Popconfirm>
             )}
           </Space>
@@ -463,7 +502,7 @@ const AssetManagement = () => {
       }
     })
     setColumns(mergedColumns)
-  }, [isAdmin, currentUser?.id, handleResize])
+  }, [isAdmin, currentUser?.id, handleResize, editRequests])
 
   return (
     <div>
@@ -656,6 +695,75 @@ const AssetManagement = () => {
         </Form>
       </Modal>
 
+      {/* 资产详情模态框 */}
+      <Modal
+        title="资产详情"
+        open={assetDetailModalVisible}
+        onCancel={() => {
+          setAssetDetailModalVisible(false)
+          setCurrentAssetDetail(null)
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setAssetDetailModalVisible(false)
+            setCurrentAssetDetail(null)
+          }}>
+            关闭
+          </Button>
+        ]}
+        width={800}
+      >
+        {currentAssetDetail && (
+          <Descriptions bordered column={2} size="small">
+            <Descriptions.Item label="资产编号" span={2}>
+              {currentAssetDetail.asset_number || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="所属大类" span={2}>
+              {currentAssetDetail.category?.name || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="实物名称" span={2}>
+              {currentAssetDetail.name || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="规格型号">
+              {currentAssetDetail.specification || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="状态">
+              {currentAssetDetail.status || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="MAC地址">
+              {currentAssetDetail.mac_address || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="IP地址">
+              {currentAssetDetail.ip_address || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="使用人">
+              {currentAssetDetail.user?.real_name ? `${currentAssetDetail.user.real_name} (${currentAssetDetail.user.ehr_number})` : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="组别">
+              {currentAssetDetail.user_group || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="存放地点">
+              {currentAssetDetail.office_location || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="存放楼层">
+              {currentAssetDetail.floor || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="座位号">
+              {currentAssetDetail.seat_number || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="备注说明" span={2}>
+              {currentAssetDetail.remark || '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="创建时间">
+              {currentAssetDetail.created_at ? dayjs(currentAssetDetail.created_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
+            </Descriptions.Item>
+            <Descriptions.Item label="更新时间">
+              {currentAssetDetail.updated_at ? dayjs(currentAssetDetail.updated_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
+            </Descriptions.Item>
+          </Descriptions>
+        )}
+      </Modal>
+
       {/* 编辑申请详情模态框 */}
       <Modal
         title="编辑申请详情"
@@ -715,6 +823,7 @@ const AssetManagement = () => {
                   {Object.entries(currentEditRequest.edit_data).map(([key, value]) => {
                     // 字段名称映射
                     const fieldNames = {
+                      category_id: '所属大类',
                       name: '实物名称',
                       specification: '规格型号',
                       status: '状态',
@@ -723,12 +832,30 @@ const AssetManagement = () => {
                       office_location: '存放办公地点',
                       floor: '存放楼层',
                       seat_number: '座位号',
+                      user_id: '使用人',
                       user_group: '使用人组别',
                       remark: '备注说明'
                     }
+                    
+                    // 处理特殊字段的显示值
+                    let displayValue = value
+                    if (key === 'category_id' && value) {
+                      // 查找类别名称
+                      const category = categories.find(cat => cat.id === value)
+                      displayValue = category ? category.name : value
+                    } else if (key === 'user_id' && value) {
+                      // 查找用户名称
+                      const user = users.find(u => u.id === value)
+                      displayValue = user ? `${user.real_name} (${user.ehr_number})` : value
+                    } else if (value === null || value === '') {
+                      displayValue = '(清空)'
+                    } else {
+                      displayValue = String(value)
+                    }
+                    
                     return (
-                      <Descriptions.Item key={key} label={fieldNames[key] || key}>
-                        {value || '-'}
+                      <Descriptions.Item key={key} label={fieldNames[key] || key} span={key === 'remark' ? 2 : 1}>
+                        {displayValue || '-'}
                       </Descriptions.Item>
                     )
                   })}

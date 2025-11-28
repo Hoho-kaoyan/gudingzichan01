@@ -16,6 +16,7 @@ export const TransferProvider = ({ children }) => {
   const { user } = useAuth()
   const [pendingTransferConfirmCount, setPendingTransferConfirmCount] = useState(0)
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0)
+  const [pendingSafetyCheckCount, setPendingSafetyCheckCount] = useState(0)
 
   const fetchPendingConfirmations = async () => {
     if (!user) {
@@ -54,13 +55,36 @@ export const TransferProvider = ({ children }) => {
     }
   }
 
+  const fetchPendingSafetyChecks = async () => {
+    if (!user || user.role === 'admin') {
+      setPendingSafetyCheckCount(0)
+      return
+    }
+    try {
+      // 获取待检查的安全检查任务
+      const response = await api.get('/safety-check-results/my-tasks', {
+        params: { status: 'pending' }
+      })
+      // 计算所有任务中待检查资产的总数
+      const totalPendingCount = response.data.items?.reduce((sum, task) => {
+        return sum + (task.pending_count || 0)
+      }, 0) || 0
+      setPendingSafetyCheckCount(totalPendingCount)
+    } catch (error) {
+      console.error('获取待检查任务数量失败:', error)
+      setPendingSafetyCheckCount(0)
+    }
+  }
+
   useEffect(() => {
     fetchPendingConfirmations()
     fetchPendingApprovals()
+    fetchPendingSafetyChecks()
     // 每30秒刷新一次，确保数据同步
     const interval = setInterval(() => {
       fetchPendingConfirmations()
       fetchPendingApprovals()
+      fetchPendingSafetyChecks()
     }, 30000)
     return () => clearInterval(interval)
   }, [user])
@@ -69,7 +93,9 @@ export const TransferProvider = ({ children }) => {
     pendingTransferConfirmCount,
     refreshPendingConfirmations: fetchPendingConfirmations,
     pendingApprovalCount,
-    refreshPendingApprovals: fetchPendingApprovals
+    refreshPendingApprovals: fetchPendingApprovals,
+    pendingSafetyCheckCount,
+    refreshPendingSafetyChecks: fetchPendingSafetyChecks
   }
 
   return <TransferContext.Provider value={value}>{children}</TransferContext.Provider>

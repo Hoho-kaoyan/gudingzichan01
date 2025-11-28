@@ -27,7 +27,7 @@ const Layout = () => {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout, isAdmin } = useAuth()
-  const { pendingTransferConfirmCount, pendingApprovalCount } = useTransfer()
+  const { pendingTransferConfirmCount, pendingApprovalCount, pendingSafetyCheckCount } = useTransfer()
 
   const renderTransferLabel = () => {
     if (pendingTransferConfirmCount > 0) {
@@ -111,11 +111,30 @@ const Layout = () => {
       }
     )
   } else {
+    const renderSafetyCheckLabel = () => {
+      if (pendingSafetyCheckCount > 0) {
+        return (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            我的检查任务
+            <Badge
+              count={pendingSafetyCheckCount}
+              size="small"
+              color="#fa8c16"
+              style={{
+                backgroundColor: '#fa8c16',
+                boxShadow: '0 0 0 1px #fff'
+              }}
+            />
+          </span>
+        )
+      }
+      return '我的检查任务'
+    }
     menuItems.push(
       {
         key: '/my-safety-check-tasks',
         icon: <CheckCircleOutlined />,
-        label: '我的检查任务'
+        label: renderSafetyCheckLabel()
       }
     )
   }

@@ -3,12 +3,14 @@ import { Card, Button, Tabs, Table, Modal, Form, Radio, Input, message, Space, T
 import { CheckCircleOutlined, ClockCircleOutlined, EyeOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
+import { useTransfer } from '../contexts/TransferContext'
 import dayjs from 'dayjs'
 
 const { TextArea } = Input
 
 const MySafetyCheckTasks = () => {
   const { user } = useAuth()
+  const { refreshPendingSafetyChecks } = useTransfer()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('pending')
@@ -164,6 +166,8 @@ const MySafetyCheckTasks = () => {
         setCheckModalVisible(false)
         fetchMyTasks()
       }
+      // 刷新待检查任务数量
+      refreshPendingSafetyChecks()
     } catch (error) {
       message.error(error.response?.data?.detail || '提交失败')
     }

@@ -63,6 +63,36 @@ const AssetHistory = () => {
     return textMap[actionType] || actionType
   }
 
+  // 字段名映射：将数据库字段名转换为表单上的中文名称
+  const getFieldLabel = (fieldName) => {
+    const fieldMap = {
+      asset_number: '资产编号',
+      category_id: '所属大类',
+      name: '实物名称',
+      specification: '规格型号',
+      status: '状态',
+      mac_address: 'MAC地址',
+      ip_address: 'IP地址',
+      office_location: '存放办公地点',
+      floor: '存放楼层',
+      seat_number: '座位号',
+      user_id: '使用人',
+      user_group: '组别',
+      remark: '备注说明'
+    }
+    return fieldMap[fieldName] || fieldName
+  }
+
+  // 格式化字段值显示（处理特殊字段）
+  const formatFieldValue = (fieldName, value) => {
+    if (value == null || value === '') {
+      return '(空)'
+    }
+    // 对于 user_id，可能需要显示用户名称，但这里先显示ID，因为历史记录中可能没有用户对象
+    // 如果后续需要显示用户名称，可以在后端返回时关联用户信息
+    return value
+  }
+
   const renderHistoryItem = (item) => {
     let content = item.action_description || ''
     const details = []
@@ -85,7 +115,7 @@ const AssetHistory = () => {
           <div key="changes" style={{ marginTop: 8, padding: 8, background: '#f5f5f5', borderRadius: 4 }}>
             {changedFields.map(field => (
               <div key={field} style={{ marginBottom: 4 }}>
-                <strong>{field}:</strong> {oldValue[field] != null ? oldValue[field] : '(空)'} → {newValue[field] != null ? newValue[field] : '(空)'}
+                <strong>{getFieldLabel(field)}:</strong> {formatFieldValue(field, oldValue[field])} → {formatFieldValue(field, newValue[field])}
               </div>
             ))}
           </div>

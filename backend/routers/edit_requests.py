@@ -194,11 +194,14 @@ async def create_edit_request(
         }
         # 只记录有变化的字段
         changed_fields = {k: v for k, v in edit_data.edit_data.items() if old_values.get(k) != v}
+        # 导入字段名映射函数
+        from routers.asset_history import get_field_label
+        field_labels = [get_field_label(field) for field in changed_fields.keys()]
         create_history(
             db=db,
             asset_id=edit_data.asset_id,
             action_type="edit",
-            action_description=f"申请编辑资产:修改了 {', '.join(changed_fields.keys()) if changed_fields else '无变化'}",
+            action_description=f"申请编辑资产:修改了 {', '.join(field_labels) if field_labels else '无变化'}",
             operator_id=current_user.id,
             old_value={k: old_values.get(k) for k in changed_fields.keys() if k in old_values},
             new_value=changed_fields,

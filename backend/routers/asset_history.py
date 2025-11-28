@@ -13,6 +13,26 @@ from auth import get_current_user
 router = APIRouter()
 
 
+def get_field_label(field_name: str) -> str:
+    """将数据库字段名转换为中文名称"""
+    field_map = {
+        "asset_number": "资产编号",
+        "category_id": "所属大类",
+        "name": "实物名称",
+        "specification": "规格型号",
+        "status": "状态",
+        "mac_address": "MAC地址",
+        "ip_address": "IP地址",
+        "office_location": "存放办公地点",
+        "floor": "存放楼层",
+        "seat_number": "座位号",
+        "user_id": "使用人",
+        "user_group": "组别",
+        "remark": "备注说明"
+    }
+    return field_map.get(field_name, field_name)
+
+
 def create_history_record(
     db: Session,
     asset_id: int,

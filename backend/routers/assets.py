@@ -293,11 +293,14 @@ async def update_asset(
                 "remark": asset.remark
             }
             changed_fields = {k: v for k, v in update_data.items() if old_values.get(k) != v}
+            # 导入字段名映射函数
+            from routers.asset_history import get_field_label
+            field_labels = [get_field_label(field) for field in changed_fields.keys()]
             create_history(
                 db=db,
                 asset_id=asset_id,
                 action_type="edit",
-                action_description=f"申请编辑资产：修改了 {', '.join(changed_fields.keys()) if changed_fields else '无变化'}",
+                action_description=f"申请编辑资产：修改了 {', '.join(field_labels) if field_labels else '无变化'}",
                 operator_id=current_user.id,
                 old_value={k: old_values.get(k) for k in changed_fields.keys() if k in old_values},
                 new_value=changed_fields,
@@ -375,7 +378,16 @@ async def update_asset(
     
     # 记录编辑历史
     if changed_fields:
-        logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 编辑资产: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(changed_fields)}")
+        try:
+            # 导入字段名映射函数
+            from routers.asset_history import get_field_label
+            field_labels = [get_field_label(field) for field in changed_fields]
+        except Exception as e:
+            logger.error(f"导入字段名映射函数失败: {e}", exc_info=True)
+            # 如果导入失败，使用原始字段名
+            field_labels = changed_fields
+        
+        logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 编辑资产: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(field_labels)}")
         try:
             create_history = get_create_history_record()
             new_values = {field: getattr(asset, field) for field in changed_fields}
@@ -383,7 +395,7 @@ async def update_asset(
                 db=db,
                 asset_id=asset.id,
                 action_type="edit",
-                action_description=f"编辑资产：修改了 {', '.join(changed_fields)}",
+                action_description=f"编辑资产：修改了 {', '.join(field_labels)}",
                 operator_id=current_user.id,
                 old_value={k: old_values.get(k) for k in changed_fields if k in old_values},
                 new_value=new_values

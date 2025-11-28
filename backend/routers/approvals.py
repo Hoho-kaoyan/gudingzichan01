@@ -379,7 +379,10 @@ async def approve_request(
                         task_asset.status = "returned"  # 标记为已退库
                         logger.info(f"资产编辑审批：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
                 
-                logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产编辑申请: 资产ID {asset.id}({asset.asset_number}), 修改字段: {', '.join(changed_fields) if changed_fields else '无'}, 申请ID {request.id}")
+                # 导入字段名映射函数
+                from routers.asset_history import get_field_label
+                field_labels = [get_field_label(field) for field in changed_fields] if changed_fields else []
+                logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产编辑申请: 资产ID {asset.id}({asset.asset_number}), 修改字段: {', '.join(field_labels) if field_labels else '无'}, 申请ID {request.id}")
                 
                 # 记录审批通过历史
                 try:
@@ -389,7 +392,7 @@ async def approve_request(
                         db=db,
                         asset_id=request.asset_id,
                         action_type="edit_approve",
-                        action_description=f"审批通过资产编辑：修改了 {', '.join(changed_fields) if changed_fields else '无变化'}",
+                        action_description=f"审批通过资产编辑：修改了 {', '.join(field_labels) if field_labels else '无变化'}",
                         operator_id=request.user_id,
                         approver_id=current_user.id,
                         old_value={k: old_values.get(k) for k in changed_fields if k in old_values},

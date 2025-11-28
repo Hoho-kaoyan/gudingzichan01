@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider } from 'antd'
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import ResizableTitle from '../components/ResizableTitle'
+import dayjs from 'dayjs'
 
 const AssetManagement = () => {
   const { user: currentUser, isAdmin } = useAuth()
@@ -20,12 +21,19 @@ const AssetManagement = () => {
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
   const [columns, setColumns] = useState([])
+  const [editRequests, setEditRequests] = useState([]) // 存储编辑申请列表
+  const [editRequestModalVisible, setEditRequestModalVisible] = useState(false)
+  const [currentEditRequest, setCurrentEditRequest] = useState(null)
 
   useEffect(() => {
     if (currentUser) {
       fetchAssets()
       fetchCategories()
       fetchUsers()
+      // 普通用户获取编辑申请列表
+      if (!isAdmin) {
+        fetchEditRequests()
+      }
     }
   }, [currentUser])
 
@@ -78,6 +86,15 @@ const AssetManagement = () => {
     } catch (error) {
       console.error('获取用户列表失败:', error)
       message.error('获取用户列表失败，请刷新页面重试')
+    }
+  }
+
+  const fetchEditRequests = async () => {
+    try {
+      const response = await api.get('/edit-requests/')
+      setEditRequests(response.data || [])
+    } catch (error) {
+      console.error('获取编辑申请列表失败:', error)
     }
   }
 
@@ -141,6 +158,10 @@ const AssetManagement = () => {
               message.success('编辑申请已提交，等待管理员审批')
               setModalVisible(false)
               fetchAssets()
+              // 刷新编辑申请列表
+              if (!isAdmin) {
+                fetchEditRequests()
+              }
               return
             }
           }
@@ -156,6 +177,10 @@ const AssetManagement = () => {
       }
       setModalVisible(false)
       fetchAssets()
+      // 普通用户提交编辑申请后，刷新编辑申请列表
+      if (!isAdmin) {
+        fetchEditRequests()
+      }
     } catch (error) {
       message.error(error.response?.data?.detail || '操作失败')
     }
@@ -220,8 +245,29 @@ const AssetManagement = () => {
     })
   }, [])
 
+  // 获取资产的编辑申请状态
+  const getAssetEditRequest = (assetId) => {
+    return editRequests.find(req => req.asset_id === assetId)
+  }
+
+  // 查看编辑申请详情
+  const handleViewEditRequest = async (assetId) => {
+    const request = getAssetEditRequest(assetId)
+    if (request) {
+      try {
+        // 获取完整的申请详情
+        const response = await api.get(`/edit-requests/${request.id}`)
+        setCurrentEditRequest(response.data)
+        setEditRequestModalVisible(true)
+      } catch (error) {
+        message.error('获取编辑申请详情失败')
+      }
+    }
+  }
+
   // 定义列配置
-  const getBaseColumns = () => [
+  const getBaseColumns = () => {
+    const baseColumns = [
     {
       title: '资产编号',
       dataIndex: 'asset_number',
@@ -291,8 +337,48 @@ const AssetManagement = () => {
       key: 'remark',
       width: 90,
       ellipsis: true
-    },
-    {
+    }
+    ]
+
+    // 普通用户添加编辑申请状态列
+    if (!isAdmin) {
+      baseColumns.push({
+        title: '编辑申请',
+        key: 'edit_request',
+        width: 100,
+        render: (_, record) => {
+          const request = getAssetEditRequest(record.id)
+          if (request) {
+            let statusColor = 'default'
+            let statusText = '待审批'
+            if (request.status === 'approved') {
+              statusColor = 'success'
+              statusText = '已通过'
+            } else if (request.status === 'rejected') {
+              statusColor = 'error'
+              statusText = '已拒绝'
+            }
+            return (
+              <Space size="small" direction="vertical">
+                <Tag color={statusColor}>{statusText}</Tag>
+                <Button
+                  type="link"
+                  icon={<FileTextOutlined />}
+                  onClick={() => handleViewEditRequest(record.id)}
+                  size="small"
+                  style={{ padding: 0, fontSize: '12px' }}
+                >
+                  查看详情
+                </Button>
+              </Space>
+            )
+          }
+          return null
+        }
+      })
+    }
+
+    baseColumns.push({
       title: '操作',
       key: 'action',
       width: 150,
@@ -344,8 +430,10 @@ const AssetManagement = () => {
           </Space>
         )
       }
-    }
-  ]
+    })
+
+    return baseColumns
+  }
 
   // 初始化列配置
   useEffect(() => {
@@ -555,6 +643,89 @@ const AssetManagement = () => {
             <Input.TextArea rows={3} placeholder="非必填" />
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 编辑申请详情模态框 */}
+      <Modal
+        title="编辑申请详情"
+        open={editRequestModalVisible}
+        onCancel={() => {
+          setEditRequestModalVisible(false)
+          setCurrentEditRequest(null)
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setEditRequestModalVisible(false)
+            setCurrentEditRequest(null)
+          }}>
+            关闭
+          </Button>
+        ]}
+        width={700}
+      >
+        {currentEditRequest && (
+          <div>
+            <Descriptions bordered column={2} size="small">
+              <Descriptions.Item label="资产编号" span={2}>
+                {currentEditRequest.asset?.asset_number || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="资产名称" span={2}>
+                {currentEditRequest.asset?.name || '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="申请时间">
+                {currentEditRequest.created_at ? dayjs(currentEditRequest.created_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
+              </Descriptions.Item>
+              <Descriptions.Item label="审批状态">
+                {currentEditRequest.status === 'pending' && <Tag color="orange">待审批</Tag>}
+                {currentEditRequest.status === 'approved' && <Tag color="green">已通过</Tag>}
+                {currentEditRequest.status === 'rejected' && <Tag color="red">已拒绝</Tag>}
+              </Descriptions.Item>
+              {currentEditRequest.approver && (
+                <>
+                  <Descriptions.Item label="审批人">
+                    {currentEditRequest.approver.real_name} ({currentEditRequest.approver.ehr_number})
+                  </Descriptions.Item>
+                  <Descriptions.Item label="审批时间">
+                    {currentEditRequest.approved_at ? dayjs(currentEditRequest.approved_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
+                  </Descriptions.Item>
+                </>
+              )}
+              {currentEditRequest.approval_comment && (
+                <Descriptions.Item label="审批意见" span={2}>
+                  {currentEditRequest.approval_comment}
+                </Descriptions.Item>
+              )}
+            </Descriptions>
+
+            {currentEditRequest.edit_data && Object.keys(currentEditRequest.edit_data).length > 0 && (
+              <>
+                <Divider>申请修改的字段</Divider>
+                <Descriptions bordered column={2} size="small">
+                  {Object.entries(currentEditRequest.edit_data).map(([key, value]) => {
+                    // 字段名称映射
+                    const fieldNames = {
+                      name: '实物名称',
+                      specification: '规格型号',
+                      status: '状态',
+                      mac_address: 'MAC地址',
+                      ip_address: 'IP地址',
+                      office_location: '存放办公地点',
+                      floor: '存放楼层',
+                      seat_number: '座位号',
+                      user_group: '使用人组别',
+                      remark: '备注说明'
+                    }
+                    return (
+                      <Descriptions.Item key={key} label={fieldNames[key] || key}>
+                        {value || '-'}
+                      </Descriptions.Item>
+                    )
+                  })}
+                </Descriptions>
+              </>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   )

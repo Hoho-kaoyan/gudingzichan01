@@ -294,10 +294,23 @@ const MySafetyCheckTasks = () => {
             <div style={{ marginBottom: 24 }}>
               <Steps
                 current={currentAssetIndex}
-                items={currentAssets.map((asset, index) => ({
-                  title: asset.asset?.asset_number || `资产${index + 1}`,
-                  status: asset.status === 'checked' ? 'finish' : asset.status === 'pending' ? 'process' : 'wait'
-                }))}
+                items={currentAssets.map((asset, index) => {
+                  let status = 'wait'; // 默认等待状态
+                  
+                  if (index === currentAssetIndex) {
+                    // 当前正在检查的资产
+                    status = 'process';
+                  } else if (asset.status === 'checked') {
+                    // 已完成的资产
+                    status = 'finish';
+                  }
+                  // 其他情况保持 wait 状态
+                  
+                  return {
+                    title: asset.asset?.asset_number || `资产${index + 1}`,
+                    status: status
+                  };
+                })}
               />
             </div>
 

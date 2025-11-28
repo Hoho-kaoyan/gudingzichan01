@@ -1,12 +1,16 @@
 """
 数据库配置和会话管理
 """
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-# 数据库文件路径（相对于backend目录）
-SQLALCHEMY_DATABASE_URL = "sqlite:///./assets.db"
+# 获取当前文件所在目录（backend目录）的绝对路径
+BASE_DIR = Path(__file__).resolve().parent
+# 数据库文件路径（始终在backend目录下）
+DATABASE_PATH = BASE_DIR / "assets.db"
+SQLALCHEMY_DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
 # 创建数据库引擎
 engine = create_engine(

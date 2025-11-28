@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 const UserManagement = () => {
@@ -10,6 +10,8 @@ const UserManagement = () => {
   const [form] = Form.useForm()
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
+  const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
+  const [importErrors, setImportErrors] = useState([])
 
   useEffect(() => {
     fetchUsers()
@@ -90,14 +92,23 @@ const UserManagement = () => {
       const response = await api.post('/users/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      const { success_count, error_count, errors } = response.data
-      message.success(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条`)
-      if (errors.length > 0) {
-        console.error('导入错误:', errors)
+      const { success_count, error_count, errors, error_details } = response.data
+      
+      if (error_count > 0) {
+        // 如果有错误，显示错误详情模态框
+        setImportErrors(error_details || errors.map((err, idx) => ({
+          row_number: idx + 1,
+          error_message: err,
+          row_data: {}
+        })))
+        setImportErrorModalVisible(true)
+        message.warning(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条，请查看失败详情`)
+      } else {
+        message.success(`导入完成：成功 ${success_count} 条`)
       }
       fetchUsers(filters)
     } catch (error) {
-      message.error('导入失败')
+      message.error(error.response?.data?.detail || '导入失败')
     }
     return false // 阻止自动上传
   }
@@ -271,6 +282,122 @@ const UserManagement = () => {
             </Form.Item>
           )}
         </Form>
+      </Modal>
+
+      {/* 导入错误详情模态框 */}
+      <Modal
+        title="导入失败记录详情"
+        open={importErrorModalVisible}
+        onCancel={() => {
+          setImportErrorModalVisible(false)
+          setImportErrors([])
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setImportErrorModalVisible(false)
+            setImportErrors([])
+          }}>
+            关闭
+          </Button>
+        ]}
+        width={900}
+      >
+        <Alert
+          message={`共 ${importErrors.length} 条记录导入失败`}
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Table
+          dataSource={importErrors}
+          rowKey={(record, index) => `error-${record.row_number || index}`}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条失败记录`
+          }}
+          scroll={{ x: 800 }}
+          size="small"
+          columns={[
+            {
+              title: '行号',
+              dataIndex: 'row_number',
+              key: 'row_number',
+              width: 80,
+              fixed: 'left'
+            },
+            {
+              title: '失败原因',
+              dataIndex: 'error_message',
+              key: 'error_message',
+              width: 250,
+              ellipsis: true,
+              render: (text) => (
+                <span style={{ color: '#ff4d4f' }}>{text}</span>
+              )
+            },
+            {
+              title: 'EHR号',
+              dataIndex: ['row_data', 'EHR号'],
+              key: 'ehr_number',
+              width: 120
+            },
+            {
+              title: '姓名',
+              dataIndex: ['row_data', '姓名'],
+              key: 'real_name',
+              width: 120
+            },
+            {
+              title: '组别',
+              dataIndex: ['row_data', '组别'],
+              key: 'group',
+              width: 120
+            },
+            {
+              title: '角色',
+              dataIndex: ['row_data', '角色'],
+              key: 'role',
+              width: 100
+            },
+            {
+              title: '其他数据',
+              key: 'other_data',
+              width: 150,
+              ellipsis: true,
+              render: (_, record) => {
+                const { row_data } = record
+                const excludeFields = ['EHR号', '姓名', '组别', '角色']
+                const otherFields = Object.entries(row_data || {})
+                  .filter(([key]) => !excludeFields.includes(key))
+                  .filter(([_, value]) => value && value !== 'nan' && value !== '')
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join('; ')
+                return otherFields || '-'
+              }
+            }
+          ]}
+          expandable={{
+            expandedRowRender: (record) => {
+              const { row_data } = record
+              if (!row_data || Object.keys(row_data).length === 0) {
+                return <div style={{ padding: 16 }}>无原始数据</div>
+              }
+              return (
+                <div style={{ padding: 16, background: '#fafafa' }}>
+                  <Descriptions bordered column={2} size="small">
+                    {Object.entries(row_data).map(([key, value]) => (
+                      <Descriptions.Item key={key} label={key} span={1}>
+                        {value && value !== 'nan' ? String(value) : '-'}
+                      </Descriptions.Item>
+                    ))}
+                  </Descriptions>
+                </div>
+              )
+            },
+            rowExpandable: (record) => record.row_data && Object.keys(record.row_data).length > 0
+          }}
+        />
       </Modal>
     </div>
   )

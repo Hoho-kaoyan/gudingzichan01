@@ -169,8 +169,12 @@ async def import_users(
         success_count = 0
         error_count = 0
         errors = []
+        error_details = []
         
         for index, row in df.iterrows():
+            row_number = index + 2  # Excel行号（从2开始，第1行是表头）
+            row_data = row.to_dict()  # 保存原始行数据
+            
             try:
                 ehr_number = str(row['EHR号']).strip()
                 real_name = str(row['姓名']).strip()
@@ -181,14 +185,40 @@ async def import_users(
                 # 验证EHR号
                 if len(ehr_number) != 7 or not ehr_number.isdigit():
                     error_count += 1
-                    errors.append(f"第{index+2}行：EHR号格式错误（必须为7位数字）")
+                    error_msg = "EHR号格式错误（必须为7位数字）"
+                    errors.append(f"第{row_number}行：{error_msg}")
+                    # 转换行数据为字典，处理NaN值
+                    row_data_dict = {}
+                    for k, v in row_data.items():
+                        if pd.isna(v) or v is None:
+                            row_data_dict[k] = ''
+                        else:
+                            row_data_dict[k] = str(v)
+                    error_details.append({
+                        "row_number": row_number,
+                        "error_message": error_msg,
+                        "row_data": row_data_dict
+                    })
                     continue
                 
                 # 检查EHR号是否已存在
                 existing_user = db.query(User).filter(User.ehr_number == ehr_number).first()
                 if existing_user:
                     error_count += 1
-                    errors.append(f"第{index+2}行：EHR号{ehr_number}已存在")
+                    error_msg = f"EHR号{ehr_number}已存在"
+                    errors.append(f"第{row_number}行：{error_msg}")
+                    # 转换行数据为字典，处理NaN值
+                    row_data_dict = {}
+                    for k, v in row_data.items():
+                        if pd.isna(v) or v is None:
+                            row_data_dict[k] = ''
+                        else:
+                            row_data_dict[k] = str(v)
+                    error_details.append({
+                        "row_number": row_number,
+                        "error_message": error_msg,
+                        "row_data": row_data_dict
+                    })
                     continue
                 
                 # 创建用户
@@ -205,14 +235,33 @@ async def import_users(
                 
             except Exception as e:
                 error_count += 1
-                errors.append(f"第{index+2}行：{str(e)}")
+                error_msg = str(e)
+                errors.append(f"第{row_number}行：{error_msg}")
+                # 转换行数据为字典，处理NaN值
+                row_data_dict = {}
+                for k, v in row_data.items():
+                    if pd.isna(v) or v is None:
+                        row_data_dict[k] = ''
+                    else:
+                        row_data_dict[k] = str(v)
+                error_details.append({
+                    "row_number": row_number,
+                    "error_message": error_msg,
+                    "row_data": row_data_dict
+                })
         
         db.commit()
+        
+        # 限制返回的错误数量
+        max_errors = 100
+        limited_errors = errors[:max_errors]
+        limited_error_details = error_details[:max_errors]
         
         return ImportResponse(
             success_count=success_count,
             error_count=error_count,
-            errors=errors[:50]  # 最多返回50个错误
+            errors=limited_errors,
+            error_details=limited_error_details
         )
         
     except Exception as e:

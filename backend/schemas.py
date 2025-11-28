@@ -222,10 +222,17 @@ class ApprovalRequest(BaseModel):
 
 
 # 批量导入响应
+class ImportErrorDetail(BaseModel):
+    """导入错误详情"""
+    row_number: int = Field(..., description="行号（Excel中的行号，从2开始，第1行是表头）")
+    error_message: str = Field(..., description="错误信息")
+    row_data: dict = Field(default_factory=dict, description="该行的原始数据")
+
 class ImportResponse(BaseModel):
     success_count: int
     error_count: int
-    errors: List[str] = []
+    errors: List[str] = []  # 保持向后兼容
+    error_details: List[ImportErrorDetail] = Field(default_factory=list, description="详细的错误信息")
 
 
 # 资产编辑申请模式

@@ -1,0 +1,428 @@
+# 开发者快速上手指南
+
+本文档帮助新开发者快速了解项目结构、开发流程和最佳实践。
+
+## 目录
+
+1. [项目概述](#项目概述)
+2. [技术栈](#技术栈)
+3. [项目结构](#项目结构)
+4. [开发环境搭建](#开发环境搭建)
+5. [代码规范](#代码规范)
+6. [开发流程](#开发流程)
+7. [常见问题](#常见问题)
+
+## 项目概述
+
+固定资产管理系统是一个全栈Web应用，用于管理企业的固定资产，包括资产信息管理、资产流转（交接、退回）、审批流程、安全检查等功能。
+
+### 主要功能模块
+
+1. **用户认证与权限管理**
+2. **资产管理**（CRUD、批量导入导出）
+3. **资产流转**（交接、退回、编辑申请）
+4. **审批管理**（交接、退回、编辑申请审批）
+5. **安全检查任务**（任务发布、检查执行、历史记录）
+6. **资产历史记录**（完整操作历史）
+7. **统计看板**
+
+## 技术栈
+
+### 后端
+- **FastAPI 0.104+**：现代、快速的Python Web框架
+- **SQLAlchemy 2.0+**：ORM数据库操作
+- **SQLite**：轻量级数据库（生产环境可替换为PostgreSQL/MySQL）
+- **JWT**：用户认证（python-jose）
+- **Pydantic**：数据验证
+- **Pandas + OpenPyXL**：Excel批量导入导出
+
+### 前端
+- **React 18**：UI框架
+- **Ant Design 5**：UI组件库
+- **React Router 6**：路由管理
+- **Axios**：HTTP客户端
+- **Vite**：构建工具
+- **dayjs**：日期处理
+
+## 项目结构
+
+```
+.
+├── backend/                    # 后端代码
+│   ├── routers/               # API路由
+│   │   ├── auth.py           # 认证相关
+│   │   ├── users.py          # 用户管理
+│   │   ├── assets.py         # 资产管理
+│   │   ├── transfers.py      # 资产交接
+│   │   ├── returns.py        # 资产退回
+│   │   ├── edit_requests.py  # 资产编辑申请
+│   │   ├── approvals.py      # 审批管理
+│   │   ├── asset_history.py  # 资产历史记录
+│   │   ├── categories.py     # 资产大类
+│   │   ├── stats.py          # 统计信息
+│   │   ├── safety_check_types.py    # 安全检查类型
+│   │   ├── safety_check_tasks.py    # 安全检查任务
+│   │   └── safety_check_results.py  # 安全检查结果
+│   ├── models.py             # 数据库模型（SQLAlchemy）
+│   ├── schemas.py            # Pydantic模式（数据验证）
+│   ├── schemas_history.py    # 历史记录相关模式
+│   ├── auth.py               # 认证工具函数
+│   ├── database.py           # 数据库配置
+│   ├── logger.py             # 日志配置
+│   ├── main.py               # 应用入口
+│   ├── init_db.py            # 数据库初始化脚本
+│   ├── requirements.txt      # Python依赖
+│   └── assets.db             # SQLite数据库文件
+│
+├── frontend/                  # 前端代码
+│   ├── src/
+│   │   ├── pages/            # 页面组件
+│   │   │   ├── Login.jsx
+│   │   │   ├── Dashboard.jsx
+│   │   │   ├── UserManagement.jsx
+│   │   │   ├── AssetManagement.jsx
+│   │   │   ├── AssetHistory.jsx
+│   │   │   ├── TransferManagement.jsx
+│   │   │   ├── ReturnManagement.jsx
+│   │   │   ├── ApprovalManagement.jsx
+│   │   │   ├── SafetyCheckTaskManagement.jsx
+│   │   │   └── MySafetyCheckTasks.jsx
+│   │   ├── components/        # 公共组件
+│   │   │   ├── Layout.jsx    # 布局组件（侧边栏、头部）
+│   │   │   ├── PrivateRoute.jsx  # 路由守卫
+│   │   │   └── ResizableTitle.jsx  # 可调整列宽标题
+│   │   ├── contexts/         # Context（全局状态）
+│   │   │   ├── AuthContext.jsx  # 认证上下文
+│   │   │   └── TransferContext.jsx  # 交接和审批上下文
+│   │   ├── utils/            # 工具函数
+│   │   │   └── api.js        # API客户端（Axios配置）
+│   │   ├── App.jsx           # 应用入口组件
+│   │   └── main.jsx          # 入口文件
+│   ├── package.json          # 前端依赖
+│   └── vite.config.js        # Vite配置
+│
+└── 文档/
+    ├── README.md             # 项目说明
+    ├── QUICKSTART.md         # 快速启动指南
+    ├── FEATURES.md           # 功能模块详细说明
+    ├── IMPORT_GUIDE.md       # 批量导入教程
+    └── DEVELOPER_GUIDE.md    # 本文件
+```
+
+## 开发环境搭建
+
+### 1. 克隆项目
+
+```bash
+git clone <repository-url>
+cd gudingzichan
+```
+
+### 2. 后端环境
+
+```bash
+cd backend
+
+# 创建虚拟环境
+python -m venv venv
+
+# 激活虚拟环境
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 初始化数据库
+python init_db.py
+
+# 启动开发服务器
+uvicorn main:app --reload --port 8000
+```
+
+### 3. 前端环境
+
+```bash
+cd frontend
+
+# 安装依赖
+npm install
+
+# 启动开发服务器
+npm run dev
+```
+
+### 4. 访问应用
+
+- 前端：http://localhost:3000
+- 后端API文档：http://localhost:8000/docs
+- 默认管理员账户：EHR号 `0000001`，密码 `admin123`
+
+## 代码规范
+
+### 后端代码规范
+
+1. **文件命名**：使用小写字母和下划线（snake_case）
+   - 路由文件：`safety_check_tasks.py`
+   - 模型文件：`models.py`
+
+2. **函数命名**：使用小写字母和下划线
+   ```python
+   def get_task_detail(task_id: int, db: Session):
+       pass
+   ```
+
+3. **类命名**：使用大驼峰（PascalCase）
+   ```python
+   class SafetyCheckTask(Base):
+       pass
+   ```
+
+4. **API路由**：使用RESTful风格
+   - `GET /api/assets/` - 获取列表
+   - `GET /api/assets/{id}` - 获取详情
+   - `POST /api/assets/` - 创建
+   - `PUT /api/assets/{id}` - 更新
+   - `DELETE /api/assets/{id}` - 删除
+
+5. **依赖注入**：使用FastAPI的依赖注入
+   ```python
+   async def get_assets(
+       db: Session = Depends(get_db),
+       current_user: User = Depends(get_current_user)
+   ):
+       pass
+   ```
+
+6. **错误处理**：使用HTTPException
+   ```python
+   if not asset:
+       raise HTTPException(status_code=404, detail="资产不存在")
+   ```
+
+7. **日志记录**：使用logger模块
+   ```python
+   from logger import logger
+   logger.info(f"用户 {user.real_name} 创建了资产 {asset.asset_number}")
+   ```
+
+### 前端代码规范
+
+1. **文件命名**：使用大驼峰（PascalCase）
+   - 组件文件：`AssetManagement.jsx`
+   - 工具文件：`api.js`
+
+2. **组件命名**：使用大驼峰
+   ```jsx
+   const AssetManagement = () => {
+       return <div>...</div>
+   }
+   ```
+
+3. **Hook使用**：使用React Hooks管理状态
+   ```jsx
+   const [assets, setAssets] = useState([])
+   useEffect(() => {
+       fetchAssets()
+   }, [])
+   ```
+
+4. **API调用**：使用统一的api工具
+   ```jsx
+   import api from '../utils/api'
+   const response = await api.get('/assets/')
+   ```
+
+5. **错误处理**：使用Ant Design的message组件
+   ```jsx
+   import { message } from 'antd'
+   message.error('操作失败')
+   ```
+
+## 开发流程
+
+### 添加新功能
+
+1. **后端开发**
+   - 在`models.py`中定义数据模型（如果需要新表）
+   - 在`schemas.py`中定义Pydantic模式
+   - 在`routers/`中创建路由文件
+   - 实现CRUD操作
+   - 添加权限控制
+   - 记录操作历史（如果需要）
+
+2. **前端开发**
+   - 在`src/pages/`中创建页面组件
+   - 在`src/App.jsx`中添加路由
+   - 在`src/components/Layout.jsx`中添加菜单项（如果需要）
+   - 实现UI和交互逻辑
+
+3. **测试**
+   - 测试API接口（使用Swagger文档）
+   - 测试前端功能
+   - 测试权限控制
+   - 测试边界情况
+
+### 数据库变更
+
+1. **添加新字段**
+   - 在`models.py`中修改模型
+   - 在`schemas.py`中更新模式
+   - 运行应用，SQLAlchemy会自动创建新字段（SQLite支持有限）
+
+2. **添加新表**
+   - 在`models.py`中定义新模型
+   - 运行应用，SQLAlchemy会自动创建表
+
+3. **数据迁移**（生产环境）
+   - 建议使用Alembic进行数据库迁移
+   - 或手动编写SQL迁移脚本
+
+### 调试技巧
+
+1. **后端调试**
+   - 使用FastAPI的自动文档：http://localhost:8000/docs
+   - 查看日志文件：`backend/logs/`
+   - 使用Python调试器（pdb）
+
+2. **前端调试**
+   - 使用浏览器开发者工具
+   - 查看Network标签页检查API请求
+   - 使用React DevTools
+
+3. **数据库查看**
+   - 使用SQLite浏览器工具
+   - 或使用命令行：`sqlite3 backend/assets.db`
+
+## 常见问题
+
+### 1. 后端启动失败
+
+**问题**：`ModuleNotFoundError: No module named 'xxx'`
+
+**解决**：
+- 确保虚拟环境已激活
+- 运行 `pip install -r requirements.txt`
+
+**问题**：端口被占用
+
+**解决**：
+- 修改启动命令中的端口：`uvicorn main:app --reload --port 8001`
+- 或关闭占用端口的进程
+
+### 2. 前端启动失败
+
+**问题**：`npm ERR! code ELIFECYCLE`
+
+**解决**：
+- 删除`node_modules`文件夹
+- 删除`package-lock.json`
+- 重新运行`npm install`
+
+**问题**：端口被占用
+
+**解决**：
+- 修改`vite.config.js`中的端口配置
+
+### 3. 数据库问题
+
+**问题**：数据库表不存在
+
+**解决**：
+- 运行`python backend/init_db.py`初始化数据库
+- 或删除`backend/assets.db`后重新运行应用
+
+**问题**：数据丢失
+
+**解决**：
+- 检查是否有数据库备份
+- 检查软删除的数据（`deleted_at`字段）
+
+### 4. 权限问题
+
+**问题**：普通用户无法访问某些功能
+
+**解决**：
+- 检查路由中的权限装饰器
+- 检查前端的路由守卫
+- 检查Context中的用户角色
+
+### 5. API请求失败
+
+**问题**：`401 Unauthorized`
+
+**解决**：
+- 检查token是否过期
+- 重新登录获取新token
+- 检查`api.js`中的token设置
+
+**问题**：`403 Forbidden`
+
+**解决**：
+- 检查用户角色和权限
+- 检查后端权限控制逻辑
+
+### 6. 安全检查任务相关问题
+
+**问题**：任务没有分配给用户
+
+**解决**：
+- 检查资产的使用人是否正确
+- 检查任务创建时资产是否有效
+- 检查资产是否已退库
+
+**问题**：任务进度不正确
+
+**解决**：
+- 检查已退库资产是否被排除
+- 检查任务状态更新逻辑
+
+## 最佳实践
+
+1. **代码提交前**
+   - 运行代码检查（lint）
+   - 测试新功能
+   - 检查是否有控制台错误
+   - 更新相关文档
+
+2. **API设计**
+   - 遵循RESTful规范
+   - 使用合适的HTTP状态码
+   - 提供清晰的错误信息
+   - 使用Pydantic进行数据验证
+
+3. **前端开发**
+   - 使用Ant Design组件
+   - 保持UI一致性
+   - 处理加载和错误状态
+   - 优化用户体验
+
+4. **数据库操作**
+   - 使用ORM而不是原生SQL
+   - 使用事务处理复杂操作
+   - 记录操作历史
+   - 使用软删除保留数据
+
+5. **安全性**
+   - 验证所有用户输入
+   - 使用JWT进行认证
+   - 实现权限控制
+   - 记录操作日志
+
+## 相关资源
+
+- [FastAPI文档](https://fastapi.tiangolo.com/)
+- [SQLAlchemy文档](https://docs.sqlalchemy.org/)
+- [React文档](https://react.dev/)
+- [Ant Design文档](https://ant.design/)
+- [Vite文档](https://vitejs.dev/)
+
+## 获取帮助
+
+- 查看项目文档：`README.md`、`FEATURES.md`
+- 查看API文档：http://localhost:8000/docs
+- 查看代码注释
+- 联系项目维护者
+

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider, Alert } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined, FileTextOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
@@ -24,6 +24,8 @@ const AssetManagement = () => {
   const [editRequests, setEditRequests] = useState([]) // 存储编辑申请列表
   const [editRequestModalVisible, setEditRequestModalVisible] = useState(false)
   const [currentEditRequest, setCurrentEditRequest] = useState(null)
+  const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
+  const [importErrors, setImportErrors] = useState([])
 
   useEffect(() => {
     if (currentUser) {
@@ -194,14 +196,23 @@ const AssetManagement = () => {
       const response = await api.post('/assets/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      const { success_count, error_count, errors } = response.data
-      message.success(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条`)
-      if (errors.length > 0) {
-        console.error('导入错误:', errors)
+      const { success_count, error_count, errors, error_details } = response.data
+      
+      if (error_count > 0) {
+        // 如果有错误，显示错误详情模态框
+        setImportErrors(error_details || errors.map((err, idx) => ({
+          row_number: idx + 1,
+          error_message: err,
+          row_data: {}
+        })))
+        setImportErrorModalVisible(true)
+        message.warning(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条，请查看失败详情`)
+      } else {
+        message.success(`导入完成：成功 ${success_count} 条`)
       }
       fetchAssets()
     } catch (error) {
-      message.error('导入失败')
+      message.error(error.response?.data?.detail || '导入失败')
     }
     return false
   }
@@ -726,6 +737,136 @@ const AssetManagement = () => {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* 导入错误详情模态框 */}
+      <Modal
+        title="导入失败记录详情"
+        open={importErrorModalVisible}
+        onCancel={() => {
+          setImportErrorModalVisible(false)
+          setImportErrors([])
+        }}
+        footer={[
+          <Button key="close" onClick={() => {
+            setImportErrorModalVisible(false)
+            setImportErrors([])
+          }}>
+            关闭
+          </Button>
+        ]}
+        width={900}
+      >
+        <Alert
+          message={`共 ${importErrors.length} 条记录导入失败`}
+          type="warning"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Table
+          dataSource={importErrors}
+          rowKey={(record, index) => `error-${record.row_number || index}`}
+          pagination={{
+            pageSize: 10,
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 条失败记录`
+          }}
+          scroll={{ x: 800 }}
+          size="small"
+          columns={[
+            {
+              title: '行号',
+              dataIndex: 'row_number',
+              key: 'row_number',
+              width: 80,
+              fixed: 'left'
+            },
+            {
+              title: '失败原因',
+              dataIndex: 'error_message',
+              key: 'error_message',
+              width: 200,
+              ellipsis: true,
+              render: (text) => (
+                <span style={{ color: '#ff4d4f' }}>{text}</span>
+              )
+            },
+            {
+              title: '资产编号',
+              dataIndex: ['row_data', '资产编号'],
+              key: 'asset_number',
+              width: 120
+            },
+            {
+              title: '所属大类',
+              dataIndex: ['row_data', '所属大类'],
+              key: 'category',
+              width: 100
+            },
+            {
+              title: '实物名称',
+              dataIndex: ['row_data', '实物名称'],
+              key: 'name',
+              width: 120,
+              ellipsis: true
+            },
+            {
+              title: '规格型号',
+              dataIndex: ['row_data', '规格型号'],
+              key: 'specification',
+              width: 100,
+              ellipsis: true
+            },
+            {
+              title: '状态',
+              dataIndex: ['row_data', '状态'],
+              key: 'status',
+              width: 80
+            },
+            {
+              title: '使用人EHR号',
+              dataIndex: ['row_data', '使用人EHR号'],
+              key: 'user_ehr',
+              width: 120
+            },
+            {
+              title: '其他数据',
+              key: 'other_data',
+              width: 200,
+              ellipsis: true,
+              render: (_, record) => {
+                const { row_data } = record
+                const excludeFields = ['资产编号', '所属大类', '实物名称', '规格型号', '状态', '使用人EHR号']
+                const otherFields = Object.entries(row_data || {})
+                  .filter(([key]) => !excludeFields.includes(key))
+                  .filter(([_, value]) => value && value !== 'nan' && value !== '')
+                  .map(([key, value]) => `${key}: ${value}`)
+                  .join('; ')
+                return otherFields || '-'
+              }
+            }
+          ]}
+          expandable={{
+            expandedRowRender: (record) => {
+              const { row_data } = record
+              if (!row_data || Object.keys(row_data).length === 0) {
+                return <div style={{ padding: 16 }}>无原始数据</div>
+              }
+              return (
+                <div style={{ padding: 16, background: '#fafafa' }}>
+                  <Descriptions bordered column={2} size="small">
+                    {Object.entries(row_data).map(([key, value]) => (
+                      <Descriptions.Item key={key} label={key} span={1}>
+                        {value && value !== 'nan' ? String(value) : '-'}
+                      </Descriptions.Item>
+                    ))}
+                  </Descriptions>
+                </div>
+              )
+            },
+            rowExpandable: (record) => record.row_data && Object.keys(record.row_data).length > 0
+          }}
+        />
       </Modal>
     </div>
   )

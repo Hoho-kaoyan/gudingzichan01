@@ -4,7 +4,7 @@ FastAPI主应用入口
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import auth, users, assets, transfers, returns, approvals, categories, stats, asset_history, edit_requests, safety_check_types, safety_check_tasks, safety_check_results
+from routers import auth, users, assets, transfers, returns, approvals, categories, stats, asset_history, edit_requests, safety_check_types, safety_check_tasks, safety_check_results, safety_check_auto_config
 import uvicorn
 # 创建数据库表
 Base.metadata.create_all(bind=engine)
@@ -39,6 +39,7 @@ app.include_router(edit_requests.router, prefix="/api/edit-requests", tags=["资
 app.include_router(safety_check_types.router, prefix="/api/safety-check-types", tags=["安全检查类型"])
 app.include_router(safety_check_tasks.router, prefix="/api/safety-check-tasks", tags=["安全检查任务"])
 app.include_router(safety_check_results.router, prefix="/api/safety-check-results", tags=["安全检查结果"])
+app.include_router(safety_check_auto_config.router, prefix="/api/safety-check-auto-config", tags=["联动安全检查配置"])
 
 
 @app.get("/")

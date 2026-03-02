@@ -12,8 +12,9 @@ import json
 
 class UserRole(str, enum.Enum):
     """用户角色枚举"""
-    ADMIN = "admin"  # 管理员
-    USER = "user"    # 普通用户
+    ADMIN = "admin"   # 管理员
+    USER = "user"     # 普通用户
+    LEADER = "leader" # 组长
 
 
 class AssetStatus(str, enum.Enum):
@@ -39,7 +40,8 @@ class User(Base):
     ehr_number = Column(String(7), unique=True, index=True, nullable=False, comment="7位数字EHR号")
     real_name = Column(String(100), nullable=False, comment="真实姓名")
     group = Column(String(50), nullable=False, comment="组别")
-    role = Column(String(20), default=UserRole.USER.value, nullable=False, comment="角色：admin或user")
+    role = Column(String(20), default=UserRole.USER.value, nullable=False, comment="角色：admin/user/leader")
+    status = Column(String(20), default="在岗", nullable=False, comment="状态：在岗/离职/长期出差/借调/产假等")
     password_hash = Column(String(255), nullable=False, comment="密码哈希")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -242,6 +244,7 @@ class SafetyCheckTask(Base):
     description = Column(Text, nullable=True, comment="任务描述")
     deadline = Column(DateTime(timezone=True), nullable=True, comment="截止时间")
     status = Column(String(20), default="pending", nullable=False, comment="任务状态：pending/completed/overdue/cancelled")
+    source = Column(String(20), nullable=True, comment="任务来源：manual/inbound/transfer/reallocation/resignation")
     created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="创建人ID")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -288,14 +291,6 @@ class TaskAsset(Base):
         """设置检查项结果（转换为JSON）"""
         self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
 
-    def set_check_items_result(self, items):
-        """设置检查项结果（转换为JSON）"""
-        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
-
-    def set_check_items_result(self, items):
-        """设置检查项结果（转换为JSON）"""
-        self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
-
 
 class SafetyCheckHistory(Base):
     """安全检查历史记录模型"""
@@ -332,6 +327,32 @@ class SafetyCheckHistory(Base):
     def set_check_items_result(self, items):
         """设置检查项结果（转换为JSON）"""
         self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
+
+
+class SafetyCheckAutoConfig(Base):
+    """系统自动分配任务类型配置（全局单行）"""
+    __tablename__ = "safety_check_auto_config"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    default_check_type_id = Column(Integer, ForeignKey("safety_check_types.id"), nullable=True, comment="默认检查类型ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    
+    # 关系
+    default_check_type = relationship("SafetyCheckType", foreign_keys=[default_check_type_id])
+
+
+class SafetyCheckAssetTypeMapping(Base):
+    """实物名称（资产类型）→ 检查类型映射"""
+    __tablename__ = "safety_check_asset_type_mapping"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    asset_type = Column(String(200), unique=True, nullable=False, index=True, comment="实物名称取值，如终端、显示器")
+    check_type_id = Column(Integer, ForeignKey("safety_check_types.id"), nullable=False, comment="检查类型ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # 关系
+    check_type = relationship("SafetyCheckType", foreign_keys=[check_type_id])
 
 
 class PendingReallocation(Base):

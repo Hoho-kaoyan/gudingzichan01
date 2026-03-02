@@ -345,6 +345,7 @@ class SafetyCheckTaskResponse(BaseModel):
     description: Optional[str] = None
     deadline: Optional[datetime] = None
     status: str
+    source: Optional[str] = None  # manual/inbound/transfer/reallocation/resignation
     created_by_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
@@ -357,6 +358,42 @@ class SafetyCheckTaskResponse(BaseModel):
     my_assets_count: Optional[int] = None  # 当前用户的资产数（普通用户）
     my_completed_count: Optional[int] = None  # 当前用户已完成的资产数
     
+    class Config:
+        from_attributes = True
+
+
+# ---------- 联动安全检查配置 ----------
+class SafetyCheckAutoConfigResponse(BaseModel):
+    id: int
+    default_check_type_id: Optional[int] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    default_check_type: Optional[SafetyCheckTypeResponse] = None
+
+    class Config:
+        from_attributes = True
+
+
+class SafetyCheckAutoConfigUpdate(BaseModel):
+    default_check_type_id: Optional[int] = None
+
+
+class SafetyCheckAssetTypeMappingCreate(BaseModel):
+    asset_type: str = Field(..., description="实物名称，如终端、显示器")
+    check_type_id: int = Field(..., description="检查类型ID")
+
+
+class SafetyCheckAssetTypeMappingUpdate(BaseModel):
+    check_type_id: int = Field(..., description="检查类型ID")
+
+
+class SafetyCheckAssetTypeMappingResponse(BaseModel):
+    id: int
+    asset_type: str
+    check_type_id: int
+    created_at: datetime
+    check_type: Optional[SafetyCheckTypeResponse] = None
+
     class Config:
         from_attributes = True
 

@@ -332,3 +332,19 @@ class SafetyCheckHistory(Base):
     def set_check_items_result(self, items):
         """设置检查项结果（转换为JSON）"""
         self.check_items_result = json.dumps(items, ensure_ascii=False) if items else None
+
+
+class PendingReallocation(Base):
+    """待生效的调拨：管理员改所有人后，等原所有人完成安全检查任务后才更新资产使用人"""
+    __tablename__ = "pending_reallocations"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, comment="资产ID")
+    new_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="新使用人ID")
+    task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=False, comment="关联的安全检查任务ID")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    
+    # 关系
+    asset = relationship("Asset")
+    new_user = relationship("User", foreign_keys=[new_user_id])
+    task = relationship("SafetyCheckTask")

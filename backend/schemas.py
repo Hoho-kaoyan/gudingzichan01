@@ -231,6 +231,7 @@ class ImportErrorDetail(BaseModel):
 class ImportResponse(BaseModel):
     success_count: int
     error_count: int
+    skip_count: int = Field(default=0, description="静默跳过的重复行数")
     errors: List[str] = []  # 保持向后兼容
     error_details: List[ImportErrorDetail] = Field(default_factory=list, description="详细的错误信息")
 

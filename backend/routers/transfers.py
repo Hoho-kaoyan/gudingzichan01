@@ -16,6 +16,24 @@ def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 
+def check_unfinished_tasks_for_asset_user(db: Session, asset_id: int, user_id: int):
+    """
+    检查指定资产的当前持有人是否存在未完成的安全检查任务。
+    如果有状态为 pending 或 overdue 的任务，则抛出 HTTPException 400。
+    """
+    from models import TaskAsset
+    unfinished = db.query(TaskAsset).filter(
+        TaskAsset.asset_id == asset_id,
+        TaskAsset.assigned_user_id == user_id,
+        TaskAsset.status.in_(["pending", "overdue"])
+    ).first()
+
+    if unfinished:
+        raise HTTPException(
+            status_code=400, 
+            detail="请先由当前所有人完成数据安全检查"
+        )
+
 router = APIRouter()
 
 
@@ -144,6 +162,9 @@ async def create_transfer_request(
     # 检查资产是否属于当前用户（普通用户只能交接自己的资产）
     if current_user.role != "admin" and asset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
+
+    # 【干预点1：创建交接申请前，拦截未完成安检】
+    check_unfinished_tasks_for_asset_user(db, asset.id, from_user_id)
     
     # 创建交接申请，初始状态为待转入人确认
     db_request = TransferRequest(
@@ -163,6 +184,18 @@ async def create_transfer_request(
     
     logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}")
     
+    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务给转出人】
+    try:
+        from safety_check_linkage import create_system_allocated_task
+        create_system_allocated_task(
+            db=db,
+            asset_id=asset.id,
+            assigned_user_id=from_user_id,
+            source="transfer"
+        )
+    except Exception as e:
+        logger.error(f"下发交接核验任务失败: {e}", exc_info=True)
+
     # 记录交接申请历史
     try:
         create_history = get_create_history_record()
@@ -254,6 +287,10 @@ async def confirm_transfer_request(
     if request.status != "waiting_confirmation":
         raise HTTPException(status_code=400, detail="只能确认待确认状态的申请")
     
+    # 【干预点2：如果是确认接收（而不是拒绝接收），转入人确认前必须确保原所有人做完了安检】
+    if confirmation_data.confirmed:
+        check_unfinished_tasks_for_asset_user(db, request.asset_id, request.from_user_id)
+
     # 更新确认信息
     request.to_user_confirmed = 1 if confirmation_data.confirmed else 0
     request.to_user_confirm_comment = confirmation_data.comment

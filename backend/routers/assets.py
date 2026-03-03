@@ -19,6 +19,7 @@ def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 from datetime import datetime
+from safety_check_linkage import create_system_allocated_task
 
 router = APIRouter()
 
@@ -228,6 +229,19 @@ async def create_asset(
     
     db.commit()
     db.refresh(db_asset)
+    
+    # 【新增逻辑】：如果资产落库后有明确的使用人（无论管理员指定还是普通用户自带），下发安检联动任务
+    if db_asset.user_id:
+        try:
+            create_system_allocated_task(
+                db=db,
+                asset_id=db_asset.id,
+                assigned_user_id=db_asset.user_id,
+                source="inbound"
+            )
+        except Exception as e:
+            logger.error(f"创建资产时触发系统安检任务下发失败: {e}", exc_info=True)
+
     return AssetResponse.model_validate(db_asset)
 
 
@@ -515,6 +529,7 @@ async def import_assets(
         
         success_count = 0
         error_count = 0
+        skip_count = 0
         errors = []
         error_details = []
         
@@ -533,22 +548,8 @@ async def import_assets(
                     Asset.deleted_at.is_(None)
                 ).first()
                 if existing:
-                    error_count += 1
-                    error_msg = f"资产编号{asset_number}已存在"
-                    errors.append(f"第{row_number}行：{error_msg}")
-                    # 转换行数据为字典，处理NaN值
-                    row_data_dict = {}
-                    for k, v in row_data.items():
-                        if pd.isna(v) or v is None:
-                            row_data_dict[k] = ''
-                        else:
-                            row_data_dict[k] = str(v)
-                    
-                    error_details.append({
-                        "row_number": row_number,
-                        "error_message": error_msg,
-                        "row_data": row_data_dict
-                    })
+                    # 改动：碰到数据库已有本编号的记录，当作正常数据静默跳过，而不是算作导入异常
+                    skip_count += 1
                     continue
                 
                 # 查找或创建资产大类
@@ -620,6 +621,20 @@ async def import_assets(
                     remark=remark if remark else None
                 )
                 db.add(db_asset)
+                db.flush() # 先flush以获取 db_asset.id
+                
+                # 【新增逻辑】：批量入库场景下，若指定了使用人，进行联动安检派单
+                if db_asset.user_id:
+                    try:
+                        create_system_allocated_task(
+                            db=db,
+                            asset_id=db_asset.id,
+                            assigned_user_id=db_asset.user_id,
+                            source="inbound"
+                        )
+                    except Exception as e:
+                        logger.error(f"批量导入时触发系统安检任务下发失败: {e}", exc_info=True)
+                
                 success_count += 1
                 
             except Exception as e:
@@ -650,6 +665,7 @@ async def import_assets(
         return ImportResponse(
             success_count=success_count,
             error_count=error_count,
+            skip_count=skip_count,
             errors=limited_errors,
             error_details=limited_error_details
         )

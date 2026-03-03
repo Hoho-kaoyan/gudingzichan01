@@ -8,6 +8,7 @@ from database import get_db
 from models import TransferRequest, ReturnRequest, AssetEditRequest, Asset, User, TaskAsset
 from schemas import ApprovalRequest
 from auth import get_current_admin_user
+from routers.transfers import check_unfinished_tasks_for_asset_user
 from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
@@ -43,6 +44,10 @@ async def approve_request(
         # 检查转入人是否已确认
         if request.to_user_confirmed is None or request.to_user_confirmed != 1:
             raise HTTPException(status_code=400, detail="转入人尚未确认，无法审批")
+
+        # 【干预点3：如果管理员点的是通过（approved），审批前必须确保原所有人做完了安检】
+        if approval_data.approved:
+            check_unfinished_tasks_for_asset_user(db, request.asset_id, request.from_user_id)
         
         # 更新申请状态
         request.status = "approved" if approval_data.approved else "rejected"

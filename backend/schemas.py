@@ -15,6 +15,7 @@ class UserBase(BaseModel):
     real_name: str = Field(..., description="真实姓名")
     group: str = Field(..., description="组别")
     role: str = Field(default="user", description="角色：admin或user")
+    status: str = Field(default="在岗", description="状态：在岗/离职/长期出差/借调/产假等")
     
     @validator('ehr_number')
     def validate_ehr_number(cls, v):
@@ -31,6 +32,7 @@ class UserUpdate(BaseModel):
     real_name: Optional[str] = None
     group: Optional[str] = None
     role: Optional[str] = None
+    status: Optional[str] = None
     password: Optional[str] = None
 
 
@@ -93,7 +95,7 @@ class AssetBase(BaseModel):
     category_id: int = Field(..., description="所属大类ID")
     name: str = Field(..., description="实物名称")
     specification: Optional[str] = Field(None, description="规格型号")
-    status: str = Field(default="在用", description="状态：在用或库存备用")
+    status: str = Field(default="在用", description="状态：在用或在库")
     mac_address: Optional[str] = Field(None, description="MAC地址")
     ip_address: Optional[str] = Field(None, description="IP地址")
     office_location: Optional[str] = Field(None, description="存放办公地点")

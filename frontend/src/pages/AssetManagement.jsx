@@ -8,7 +8,7 @@ import ResizableTitle from '../components/ResizableTitle'
 import dayjs from 'dayjs'
 
 const AssetManagement = () => {
-  const { user: currentUser, isAdmin } = useAuth()
+  const { user: currentUser, isAdmin, isLeader, isAdminOrLeader } = useAuth()
   const navigate = useNavigate()
   const [assets, setAssets] = useState([])
   const [categories, setCategories] = useState([])
@@ -34,8 +34,8 @@ const AssetManagement = () => {
       fetchAssets()
       fetchCategories()
       fetchUsers()
-      // 普通用户获取编辑申请列表
-      if (!isAdmin) {
+      // 普通用户获取编辑申请列表（组长和管理员不需要）
+      if (!isAdminOrLeader) {
         fetchEditRequests()
       }
     }
@@ -61,7 +61,8 @@ const AssetManagement = () => {
     const payload = {
       search: values.keyword || undefined,
       category_id: values.category_id || undefined,
-      status: values.status || undefined
+      status: values.status === '在库' ? undefined : values.status || undefined,
+      in_stock: values.status === '在库' ? true : undefined
     }
     setFilters(payload)
     fetchAssets(payload)
@@ -105,7 +106,9 @@ const AssetManagement = () => {
   const handleAdd = () => {
     setEditingAsset(null)
     form.resetFields()
-    if (!isAdmin && currentUser) {
+    // 普通用户创建资产时强制绑定到自己
+    // 注意：组长权限控制需要等待后端实现权限校验（任务12）
+    if (!isAdminOrLeader && currentUser) {
       form.setFieldsValue({ user_id: currentUser.id })
     }
     setModalVisible(true)
@@ -147,7 +150,8 @@ const AssetManagement = () => {
   const handleSubmit = async (values) => {
     try {
       // 普通用户创建/编辑资产时强制绑定到自己
-      if (!isAdmin && currentUser) {
+      // 注意：组长权限控制需要等待后端实现权限校验（任务12）
+      if (!isAdminOrLeader && currentUser) {
         values.user_id = currentUser.id
         // 普通用户不能修改状态，移除status字段
         if (values.status) {
@@ -162,8 +166,8 @@ const AssetManagement = () => {
             message.success('编辑申请已提交，等待管理员审批')
             setModalVisible(false)
             fetchAssets()
-            // 刷新编辑申请列表
-            if (!isAdmin) {
+            // 刷新编辑申请列表（组长和管理员不需要）
+            if (!isAdminOrLeader) {
               await fetchEditRequests()
             }
             return
@@ -187,7 +191,7 @@ const AssetManagement = () => {
           throw error
         }
       } else {
-        // 新增资产时，普通用户不能设置状态
+        // 新增资产时，普通用户和组长不能设置状态（只有管理员可以）
         if (!isAdmin && values.status) {
           delete values.status
         }
@@ -196,12 +200,23 @@ const AssetManagement = () => {
       }
       setModalVisible(false)
       fetchAssets()
-      // 普通用户提交编辑申请后，刷新编辑申请列表
-      if (!isAdmin) {
+      // 普通用户提交编辑申请后，刷新编辑申请列表（组长和管理员不需要）
+      if (!isAdminOrLeader) {
         fetchEditRequests()
       }
     } catch (error) {
-      message.error(error.response?.data?.detail || '操作失败')
+      // 处理组长权限错误（403）
+      // 注意：此错误处理需要等待后端实现组长权限校验（任务12）后生效
+      if (error.response?.status === 403 && isLeader) {
+        const errorDetail = error.response?.data?.detail || ''
+        if (errorDetail.includes('本组') || errorDetail.includes('组长')) {
+          message.error('您只能修改本组资产的使用人')
+        } else {
+          message.error(errorDetail || '操作失败')
+        }
+      } else {
+        message.error(error.response?.data?.detail || '操作失败')
+      }
     }
   }
 
@@ -348,7 +363,15 @@ const AssetManagement = () => {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 65
+      width: 80,
+      render: (status) => {
+        const isInStock = status === '库存备用' || status === '在库'
+        return (
+          <Tag color={isInStock ? 'default' : 'green'}>
+            {isInStock ? '在库' : (status || '-')}
+          </Tag>
+        )
+      }
     },
     {
       title: '使用人',
@@ -427,11 +450,12 @@ const AssetManagement = () => {
       fixed: 'right',
       resizable: false, // 操作列不需要调整宽度
       render: (_, record) => {
-        // 普通用户只能编辑自己名下的资产，不能删除
-        const canEdit = isAdmin || record.user?.id === currentUser?.id
+        // 管理员和组长可以编辑资产，普通用户只能编辑自己名下的资产
+        // 注意：组长权限控制需要等待后端实现权限校验（任务12）
+        const canEdit = isAdminOrLeader || record.user?.id === currentUser?.id
         const canDelete = isAdmin
         // 检查是否有待审批的编辑申请（仅普通用户）
-        const hasPendingRequest = !isAdmin && getAssetEditRequest(record.id)?.status === 'pending'
+        const hasPendingRequest = !isAdminOrLeader && getAssetEditRequest(record.id)?.status === 'pending'
         
         return (
           <Space size="small">
@@ -502,7 +526,7 @@ const AssetManagement = () => {
       }
     })
     setColumns(mergedColumns)
-  }, [isAdmin, currentUser?.id, handleResize, editRequests])
+  }, [isAdmin, isLeader, isAdminOrLeader, currentUser?.id, currentUser?.group, handleResize, editRequests, users])
 
   return (
     <div>
@@ -557,7 +581,7 @@ const AssetManagement = () => {
         <Form.Item label="状态" name="status">
           <Select placeholder="全部" style={{ width: 120 }} allowClear>
             <Select.Option value="在用">在用</Select.Option>
-            <Select.Option value="库存备用">库存备用</Select.Option>
+            <Select.Option value="在库">在库</Select.Option>
           </Select>
         </Form.Item>
         <Form.Item>
@@ -634,6 +658,7 @@ const AssetManagement = () => {
           >
             <Input />
           </Form.Item>
+          {/* 只有管理员可以修改状态，组长和普通用户不能修改 */}
           {isAdmin && (
             <Form.Item
               label="状态"
@@ -642,7 +667,7 @@ const AssetManagement = () => {
             >
               <Select>
                 <Select.Option value="在用">在用</Select.Option>
-                <Select.Option value="库存备用">库存备用</Select.Option>
+                <Select.Option value="在库">在库</Select.Option>
               </Select>
             </Form.Item>
           )}
@@ -680,10 +705,34 @@ const AssetManagement = () => {
             label="使用人"
             name="user_id"
           >
-            <Select allowClear disabled={!isAdmin}>
-              {users.map(user => (
-                <Select.Option key={user.id} value={user.id}>{user.real_name} ({user.ehr_number})</Select.Option>
-              ))}
+            <Select 
+              allowClear 
+              disabled={!isAdminOrLeader}
+              // 组长编辑资产时，使用人选择框只显示本组用户
+              // 注意：此功能需要等待后端实现组长权限校验（任务12）后确认是否需要调整
+              filterOption={(input, option) => {
+                if (isLeader && currentUser?.group) {
+                  // 组长只能看到本组用户
+                  const user = users.find(u => u.id === option.value)
+                  return user?.group === currentUser.group
+                }
+                return true
+              }}
+            >
+              {users
+                .filter(user => {
+                  // 组长编辑资产时，只显示本组用户
+                  // 注意：此过滤逻辑需要等待后端实现组长权限校验（任务12）后确认是否需要调整
+                  if (isLeader && currentUser?.group) {
+                    return user.group === currentUser.group
+                  }
+                  return true
+                })
+                .map(user => (
+                  <Select.Option key={user.id} value={user.id}>
+                    {user.real_name} ({user.ehr_number})
+                  </Select.Option>
+                ))}
             </Select>
           </Form.Item>
           <Form.Item
@@ -728,7 +777,7 @@ const AssetManagement = () => {
               {currentAssetDetail.specification || '-'}
             </Descriptions.Item>
             <Descriptions.Item label="状态">
-              {currentAssetDetail.status || '-'}
+              {(currentAssetDetail.status === '库存备用' || currentAssetDetail.status === '在库') ? '在库' : (currentAssetDetail.status || '-')}
             </Descriptions.Item>
             <Descriptions.Item label="MAC地址">
               {currentAssetDetail.mac_address || '-'}

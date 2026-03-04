@@ -193,7 +193,7 @@ async def create_return_request(
         }
         new_value = {
             "user_id": return_data.new_user_id if return_data.new_user_id else None,
-            "status": "库存备用",
+            "status": "在库",
             "mac_address": return_data.mac_address,
             "ip_address": return_data.ip_address,
             "office_location": return_data.office_location,

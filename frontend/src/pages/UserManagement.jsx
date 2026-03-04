@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions, Tag } from 'antd'
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined, UserDeleteOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 const UserManagement = () => {
   const [users, setUsers] = useState([])
@@ -12,6 +12,10 @@ const UserManagement = () => {
   const [filters, setFilters] = useState({})
   const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
   const [importErrors, setImportErrors] = useState([])
+  const [resignationModalVisible, setResignationModalVisible] = useState(false)
+  const [resigningUser, setResigningUser] = useState(null)
+  const [userAssetCount, setUserAssetCount] = useState(0)
+  const [markingResignation, setMarkingResignation] = useState(false)
 
   useEffect(() => {
     fetchUsers()
@@ -22,7 +26,8 @@ const UserManagement = () => {
     try {
       const params = { ...filters, ...(extraFilters || {}) }
       const response = await api.get('/users/', { params })
-      setUsers(response.data)
+      // 方案乙：不在用户列表中显示仓库用户
+      setUsers((response.data || []).filter(u => u.ehr_number !== '1000000'))
     } catch (error) {
       message.error('获取用户列表失败')
     } finally {
@@ -34,7 +39,8 @@ const UserManagement = () => {
     const values = filtersForm.getFieldsValue()
     const payload = {
       search: values.keyword || undefined,
-      role: values.role || undefined
+      role: values.role || undefined,
+      status: values.status || undefined
     }
     setFilters(payload)
     fetchUsers(payload)
@@ -49,6 +55,7 @@ const UserManagement = () => {
   const handleAdd = () => {
     setEditingUser(null)
     form.resetFields()
+    form.setFieldsValue({ status: '在岗' })
     setModalVisible(true)
   }
 
@@ -113,6 +120,54 @@ const UserManagement = () => {
     return false // 阻止自动上传
   }
 
+  // 获取用户资产数量
+  const fetchUserAssetCount = async (userId) => {
+    try {
+      const response = await api.get('/assets/', { params: { user_id: userId, limit: 10000 } })
+      // 只统计有使用人的资产（user_id不为空）
+      return response.data.filter(asset => asset.user_id === userId).length
+    } catch (error) {
+      console.error('获取用户资产数量失败:', error)
+      return 0
+    }
+  }
+
+  // 打开标记离职确认Modal
+  const handleOpenMarkResignation = async (user) => {
+    setResigningUser(user)
+    const count = await fetchUserAssetCount(user.id)
+    setUserAssetCount(count)
+    setResignationModalVisible(true)
+  }
+
+  // 确认标记离职
+  const handleConfirmMarkResignation = async () => {
+    if (!resigningUser) return
+
+    setMarkingResignation(true)
+    try {
+      // 调用后端接口（假设路径为 PUT /api/users/{user_id}/mark-resignation）
+      const response = await api.put(`/users/${resigningUser.id}/mark-resignation`)
+
+      if (userAssetCount > 0) {
+        const taskCount = response.data?.task_count || userAssetCount
+        message.success(`标记离职成功，已为该用户创建${taskCount}个安全检查任务`)
+      } else {
+        message.success('标记离职成功')
+      }
+
+      setResignationModalVisible(false)
+      setResigningUser(null)
+      setUserAssetCount(0)
+      fetchUsers()
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail || '标记离职失败'
+      message.error(errorMsg)
+    } finally {
+      setMarkingResignation(false)
+    }
+  }
+
   const columns = [
     {
       title: 'EHR号',
@@ -134,9 +189,29 @@ const UserManagement = () => {
       dataIndex: 'role',
       key: 'role',
       render: (role) => {
-        if (role === 'admin') return '管理员'
-        if (role === 'leader') return '组长'
-        return '普通用户'
+        const roleMap = {
+          'admin': '管理员',
+          'leader': '组长',
+          'user': '普通用户'
+        }
+        return roleMap[role] || role
+      }
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      key: 'status',
+      width: 100,
+      render: (status) => {
+        const statusConfig = {
+          '在岗': { color: 'success', text: '在岗' },
+          '离职': { color: 'error', text: '离职' },
+          '长期出差': { color: 'processing', text: '长期出差' },
+          '借调': { color: 'warning', text: '借调' },
+          '产假': { color: 'purple', text: '产假' }
+        }
+        const config = statusConfig[status] || { color: 'default', text: status || '在岗' }
+        return <Tag color={config.color}>{config.text}</Tag>
       }
     },
     {
@@ -150,6 +225,16 @@ const UserManagement = () => {
             <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
               编辑
             </Button>
+            {record.status !== '离职' && (
+              <Button
+                type="link"
+                danger
+                icon={<UserDeleteOutlined />}
+                onClick={() => handleOpenMarkResignation(record)}
+              >
+                标记离职
+              </Button>
+            )}
             {!isWarehouse && (
               <Popconfirm
                 title="确定要删除吗？"
@@ -203,6 +288,15 @@ const UserManagement = () => {
             <Select.Option value="admin">管理员</Select.Option>
             <Select.Option value="leader">组长</Select.Option>
             <Select.Option value="user">普通用户</Select.Option>
+          </Select>
+        </Form.Item>
+        <Form.Item label="状态" name="status">
+          <Select placeholder="全部" style={{ width: 120 }} allowClear>
+            <Select.Option value="在岗">在岗</Select.Option>
+            <Select.Option value="离职">离职</Select.Option>
+            <Select.Option value="长期出差">长期出差</Select.Option>
+            <Select.Option value="借调">借调</Select.Option>
+            <Select.Option value="产假">产假</Select.Option>
           </Select>
         </Form.Item>
         <Form.Item>
@@ -268,6 +362,20 @@ const UserManagement = () => {
               <Select.Option value="user">普通用户</Select.Option>
               <Select.Option value="leader">组长</Select.Option>
               <Select.Option value="admin">管理员</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            label="状态"
+            name="status"
+            rules={[{ required: true, message: '请选择状态' }]}
+            initialValue="在岗"
+          >
+            <Select>
+              <Select.Option value="在岗">在岗</Select.Option>
+              <Select.Option value="离职">离职</Select.Option>
+              <Select.Option value="长期出差">长期出差</Select.Option>
+              <Select.Option value="借调">借调</Select.Option>
+              <Select.Option value="产假">产假</Select.Option>
             </Select>
           </Form.Item>
           {!editingUser && (
@@ -404,6 +512,49 @@ const UserManagement = () => {
             rowExpandable: (record) => record.row_data && Object.keys(record.row_data).length > 0
           }}
         />
+      </Modal>
+
+      {/* 标记离职确认Modal */}
+      <Modal
+        title="标记离职"
+        open={resignationModalVisible}
+        onCancel={() => {
+          setResignationModalVisible(false)
+          setResigningUser(null)
+          setUserAssetCount(0)
+        }}
+        onOk={handleConfirmMarkResignation}
+        confirmLoading={markingResignation}
+        okText="确认标记离职"
+        cancelText="取消"
+        width={500}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Alert
+            message="是否完成数据安全检查进行资产交接？"
+            type="warning"
+            showIcon
+            style={{ marginBottom: 16 }}
+          />
+          {resigningUser && (
+            <div style={{ marginBottom: 16 }}>
+              <p><strong>用户：</strong>{resigningUser.real_name}（{resigningUser.ehr_number}）</p>
+              <p><strong>名下资产数量：</strong>{userAssetCount}个</p>
+            </div>
+          )}
+          <div>
+            <p><strong>确认后将：</strong></p>
+            <ol style={{ marginLeft: 20, marginTop: 8 }}>
+              <li>将该用户状态更新为「离职」</li>
+              {userAssetCount > 0 && (
+                <>
+                  <li>为该用户{userAssetCount}个资产自动创建安全检查任务</li>
+                  <li>任务将分配给该用户</li>
+                </>
+              )}
+            </ol>
+          </div>
+        </div>
       </Modal>
     </div>
   )

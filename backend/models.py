@@ -20,7 +20,7 @@ class UserRole(str, enum.Enum):
 class AssetStatus(str, enum.Enum):
     """资产状态枚举"""
     IN_USE = "在用"      # 在用
-    IN_STOCK = "库存备用"  # 库存备用
+    IN_STOCK = "在库"    # 在库
 
 
 class ApprovalStatus(str, enum.Enum):
@@ -75,7 +75,7 @@ class Asset(Base):
     category_id = Column(Integer, ForeignKey("asset_categories.id"), nullable=False, comment="所属大类ID")
     name = Column(String(200), nullable=False, comment="实物名称")
     specification = Column(String(200), nullable=True, comment="规格型号（可为空）")
-    status = Column(String(20), default=AssetStatus.IN_USE.value, nullable=False, comment="状态：在用或库存备用")
+    status = Column(String(20), default=AssetStatus.IN_USE.value, nullable=False, comment="状态：在用或在库")
     mac_address = Column(String(50), nullable=True, comment="MAC地址")
     ip_address = Column(String(50), nullable=True, comment="IP地址")
     

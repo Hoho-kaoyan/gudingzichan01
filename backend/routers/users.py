@@ -30,6 +30,7 @@ async def get_users(
     limit: int = 100,
     search: Optional[str] = Query(None, description="搜索关键词，支持模糊搜索所有字段"),
     role: Optional[str] = Query(None, description="按角色筛选"),
+    status: Optional[str] = Query(None, description="按状态筛选"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
@@ -49,6 +50,10 @@ async def get_users(
     # 按角色筛选
     if role:
         query = query.filter(User.role == role)
+    
+    # 按状态筛选
+    if status:
+        query = query.filter(User.status == status)
     
     users = query.offset(skip).limit(limit).all()
     return [UserResponse.model_validate(user) for user in users]
@@ -86,6 +91,7 @@ async def create_user(
         real_name=user_data.real_name,
         group=user_data.group,
         role=user_data.role,
+        status=user_data.status if hasattr(user_data, 'status') and user_data.status else "在岗",
         password_hash=hashed_password
     )
     db.add(db_user)
@@ -113,6 +119,8 @@ async def update_user(
         user.group = user_data.group
     if user_data.role is not None:
         user.role = user_data.role
+    if user_data.status is not None:
+        user.status = user_data.status
     if user_data.password is not None:
         user.password_hash = get_password_hash(user_data.password)
     
@@ -186,6 +194,7 @@ async def import_users(
                 real_name = str(row['姓名']).strip()
                 group = str(row['组别']).strip()
                 role = str(row.get('角色', 'user')).strip() if '角色' in df.columns else 'user'
+                status = str(row.get('状态', '在岗')).strip() if '状态' in df.columns else '在岗'
                 password = str(row.get('密码', '123456')).strip() if '密码' in df.columns else '123456'
                 
                 # 验证EHR号
@@ -234,6 +243,7 @@ async def import_users(
                     real_name=real_name,
                     group=group,
                     role=role,
+                    status=status,
                     password_hash=hashed_password
                 )
                 db.add(db_user)

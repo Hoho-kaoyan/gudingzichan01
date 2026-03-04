@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip, Switch } from 'antd'
-import { PlusOutlined, EyeOutlined, CloseOutlined, SettingOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip, Switch, Empty } from 'antd'
+import { PlusOutlined, EyeOutlined, CloseOutlined, SettingOutlined, EditOutlined, DeleteOutlined, ToolOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
@@ -31,6 +31,18 @@ const SafetyCheckTaskManagement = () => {
   const [typeForm] = Form.useForm()
   const [form] = Form.useForm()
   const [filterForm] = Form.useForm()
+
+  // 联动任务配置相关状态
+  const [autoConfigModalVisible, setAutoConfigModalVisible] = useState(false)
+  const [autoConfig, setAutoConfig] = useState(null)
+  const [mappings, setMappings] = useState([])
+  const [mappingModalVisible, setMappingModalVisible] = useState(false)
+  const [editingMapping, setEditingMapping] = useState(null)
+  const [assetNames, setAssetNames] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [mappingLoading, setMappingLoading] = useState(false)
+  const [mappingForm] = Form.useForm()
+  const [defaultCheckTypeId, setDefaultCheckTypeId] = useState(null)
 
   useEffect(() => {
     if (isAdmin) {
@@ -282,6 +294,129 @@ const SafetyCheckTaskManagement = () => {
     }
   }
 
+  // ========== 联动任务配置相关函数 ==========
+  
+  // 打开联动配置Modal
+  const handleOpenAutoConfig = async () => {
+    setAutoConfigModalVisible(true)
+    // 确保检查类型列表已加载
+    if (checkTypes.length === 0) {
+      await fetchCheckTypes()
+    }
+    await fetchAutoConfig()
+    await fetchMappings()
+  }
+
+  // 获取全局配置
+  const fetchAutoConfig = async () => {
+    try {
+      const response = await api.get('/safety-check-auto-config')
+      setAutoConfig(response.data)
+      setDefaultCheckTypeId(response.data.default_check_type_id || null)
+    } catch (error) {
+      message.error('获取全局配置失败')
+    }
+  }
+
+  // 获取映射列表
+  const fetchMappings = async () => {
+    setMappingLoading(true)
+    try {
+      const response = await api.get('/safety-check-auto-config/asset-type-mappings')
+      setMappings(response.data || [])
+    } catch (error) {
+      message.error('获取映射列表失败')
+    } finally {
+      setMappingLoading(false)
+    }
+  }
+
+  // 保存全局配置
+  const handleSaveAutoConfig = async () => {
+    setSaving(true)
+    try {
+      await api.put('/safety-check-auto-config', {
+        default_check_type_id: defaultCheckTypeId || null
+      })
+      message.success('保存成功')
+      await fetchAutoConfig()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  // 获取实物名称列表（从资产中提取）
+  const fetchAssetNames = async () => {
+    try {
+      const response = await api.get('/assets/', { params: { limit: 10000 } })
+      const names = [...new Set(response.data.map(asset => asset.name).filter(Boolean))]
+      names.sort()
+      setAssetNames(names)
+    } catch (error) {
+      message.error('获取实物名称列表失败')
+    }
+  }
+
+  // 打开新增映射Modal
+  const handleAddMapping = async () => {
+    setEditingMapping(null)
+    mappingForm.resetFields()
+    await fetchAssetNames()
+    setMappingModalVisible(true)
+  }
+
+  // 打开编辑映射Modal
+  const handleEditMapping = async (record) => {
+    setEditingMapping(record)
+    mappingForm.setFieldsValue({
+      asset_type: record.asset_type,
+      check_type_id: record.check_type_id
+    })
+    await fetchAssetNames()
+    setMappingModalVisible(true)
+  }
+
+  // 删除映射
+  const handleDeleteMapping = async (mappingId) => {
+    try {
+      await api.delete(`/safety-check-auto-config/asset-type-mappings/${mappingId}`)
+      message.success('删除成功')
+      await fetchMappings()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '删除失败')
+    }
+  }
+
+  // 提交映射表单（新增或编辑）
+  const handleMappingSubmit = async (values) => {
+    try {
+      if (editingMapping) {
+        // 编辑
+        await api.put(`/safety-check-auto-config/asset-type-mappings/${editingMapping.id}`, {
+          check_type_id: values.check_type_id
+        })
+        message.success('更新成功')
+      } else {
+        // 新增
+        await api.post('/safety-check-auto-config/asset-type-mappings', {
+          asset_type: values.asset_type,
+          check_type_id: values.check_type_id
+        })
+        message.success('新增成功')
+      }
+      setMappingModalVisible(false)
+      mappingForm.resetFields()
+      setEditingMapping(null)
+      await fetchMappings()
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail || '操作失败'
+      message.error(errorMsg)
+      // Modal不关闭，用户可以修改后重试
+    }
+  }
+
   const columns = [
     {
       title: '任务编号',
@@ -396,6 +531,9 @@ const SafetyCheckTaskManagement = () => {
           <Button icon={<SettingOutlined />} onClick={handleOpenTypeManagement}>
             检查类型管理
           </Button>
+          <Button icon={<ToolOutlined />} onClick={handleOpenAutoConfig}>
+            联动任务配置
+          </Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
             发布新任务
           </Button>
@@ -460,7 +598,7 @@ const SafetyCheckTaskManagement = () => {
                   <Form.Item name="status" label="状态">
                     <Select placeholder="全部" style={{ width: 120 }} allowClear>
                       <Select.Option value="在用">在用</Select.Option>
-                      <Select.Option value="库存备用">库存备用</Select.Option>
+                      <Select.Option value="在库">在库</Select.Option>
                     </Select>
                   </Form.Item>
                   <Form.Item name="search" label="搜索">
@@ -878,6 +1016,184 @@ const SafetyCheckTaskManagement = () => {
             </Form.Item>
           </Form>
         </Modal>
+      </Modal>
+
+      {/* 联动任务配置Modal */}
+      <Modal
+        title="联动任务类型配置"
+        open={autoConfigModalVisible}
+        onCancel={() => {
+          setAutoConfigModalVisible(false)
+          setAutoConfig(null)
+          setMappings([])
+          setDefaultCheckTypeId(null)
+        }}
+        width={1000}
+        footer={null}
+        destroyOnClose
+        maskClosable
+      >
+        {/* 全局默认检查类型配置 */}
+        <Card 
+          title={<h4 style={{ margin: 0 }}>全局默认检查类型</h4>}
+          style={{ marginBottom: 24 }}
+        >
+          <div style={{ marginBottom: 8, color: '#999', fontSize: 12 }}>
+            当资产实物名称未配置映射时，系统将使用此默认检查类型创建任务
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            {autoConfig?.default_check_type ? (
+              <div>当前默认检查类型：<strong>{autoConfig.default_check_type.name}</strong></div>
+            ) : (
+              <div>当前未配置默认检查类型</div>
+            )}
+          </div>
+          <Space>
+            <Select
+              value={defaultCheckTypeId}
+              onChange={(value) => setDefaultCheckTypeId(value)}
+              placeholder="请选择默认检查类型"
+              style={{ width: 300 }}
+              allowClear
+            >
+              {checkTypes.filter(type => type.is_active).map(type => (
+                <Select.Option key={type.id} value={type.id}>
+                  {type.name}
+                </Select.Option>
+              ))}
+            </Select>
+            <Button 
+              type="primary" 
+              onClick={handleSaveAutoConfig}
+              loading={saving}
+            >
+              保存
+            </Button>
+          </Space>
+        </Card>
+
+        {/* 实物名称→检查类型映射管理 */}
+        <Card 
+          title={<h4 style={{ margin: 0 }}>实物名称→检查类型映射</h4>}
+        >
+          <div style={{ marginBottom: 8, color: '#999', fontSize: 12 }}>
+            为特定实物名称配置对应的检查类型，优先级高于默认检查类型
+          </div>
+          <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'flex-end' }}>
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddMapping}>
+              新增映射
+            </Button>
+          </div>
+          <Table
+            columns={[
+              {
+                title: '实物名称',
+                dataIndex: 'asset_type',
+                key: 'asset_type',
+                width: 200,
+              },
+              {
+                title: '检查类型',
+                key: 'check_type',
+                width: 250,
+                render: (_, record) => record.check_type?.name || '-'
+              },
+              {
+                title: '创建时间',
+                dataIndex: 'created_at',
+                key: 'created_at',
+                width: 180,
+                render: (time) => time ? dayjs(time).format('YYYY-MM-DD HH:mm') : '-'
+              },
+              {
+                title: '操作',
+                key: 'action',
+                width: 150,
+                fixed: 'right',
+                render: (_, record) => (
+                  <Space>
+                    <Button
+                      type="link"
+                      icon={<EditOutlined />}
+                      onClick={() => handleEditMapping(record)}
+                    >
+                      编辑
+                    </Button>
+                    <Popconfirm
+                      title="确定要删除此映射吗？"
+                      onConfirm={() => handleDeleteMapping(record.id)}
+                      okText="确定"
+                      cancelText="取消"
+                    >
+                      <Button type="link" danger icon={<DeleteOutlined />}>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  </Space>
+                )
+              }
+            ]}
+            dataSource={mappings}
+            rowKey="id"
+            loading={mappingLoading}
+            pagination={{ pageSize: 10 }}
+            scroll={{ x: 800 }}
+            locale={{
+              emptyText: <Empty description="暂无映射配置" />
+            }}
+          />
+        </Card>
+      </Modal>
+
+      {/* 新增/编辑映射Modal */}
+      <Modal
+        title={editingMapping ? '编辑映射' : '新增映射'}
+        open={mappingModalVisible}
+        onCancel={() => {
+          setMappingModalVisible(false)
+          mappingForm.resetFields()
+          setEditingMapping(null)
+        }}
+        onOk={() => mappingForm.submit()}
+        width={600}
+        destroyOnClose
+      >
+        <Form
+          form={mappingForm}
+          layout="vertical"
+          onFinish={handleMappingSubmit}
+        >
+          <Form.Item
+            name="asset_type"
+            label="实物名称"
+            rules={[{ required: true, message: '请选择实物名称' }]}
+            help="请选择资产的实物名称，例如：终端、显示器、主机"
+          >
+            <Select
+              placeholder="请选择实物名称"
+              disabled={!!editingMapping}
+            >
+              {assetNames.map(name => (
+                <Select.Option key={name} value={name}>
+                  {name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+          <Form.Item
+            name="check_type_id"
+            label="检查类型"
+            rules={[{ required: true, message: '请选择检查类型' }]}
+          >
+            <Select placeholder="请选择检查类型">
+              {checkTypes.filter(type => type.is_active).map(type => (
+                <Select.Option key={type.id} value={type.id}>
+                  {type.name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

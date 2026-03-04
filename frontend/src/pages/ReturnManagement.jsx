@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Table, Button, Modal, Form, Input, Select, message, Space, Divider, AutoComplete } from 'antd'
 import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
+import { parseSafetyCheckError } from '../utils/safetyCheckError'
 
 const { Option } = Select
 const { TextArea } = Input
 
+const MY_TASKS_PATH = '/my-safety-check-tasks'
+
 const ReturnManagement = () => {
+  const navigate = useNavigate()
   const { user: currentUser, isAdmin } = useAuth()
   const [returns, setReturns] = useState([])
   const [assets, setAssets] = useState([])
@@ -145,7 +150,17 @@ const ReturnManagement = () => {
       setSelectedAsset(null)
       fetchReturns(filters)
     } catch (error) {
-      message.error(error.response?.data?.detail || '提交失败')
+      const { isSafetyCheck, message: msg } = parseSafetyCheckError(error)
+      if (isSafetyCheck) {
+        Modal.warning({
+          title: '需要先完成数据安全检查',
+          content: msg,
+          okText: '前往我的检查任务',
+          onOk: () => navigate(MY_TASKS_PATH)
+        })
+      } else {
+        message.error(msg)
+      }
     }
   }
 

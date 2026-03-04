@@ -26,11 +26,11 @@ def init_database():
                 password_hash=get_password_hash("admin123")
             )
             db.add(admin_user)
-            print("✓ 创建默认管理员账户")
+            print("[OK] 创建默认管理员账户")
             print("  EHR号: 0000001")
             print("  密码: admin123")
         else:
-            print("✓ 管理员账户已存在")
+            print("[OK] 管理员账户已存在")
         
         # 检查是否已有"仓库"用户
         warehouse_user = db.query(User).filter(User.ehr_number == "1000000").first()
@@ -44,11 +44,11 @@ def init_database():
                 password_hash=get_password_hash("warehouse")  # 设置一个默认密码，但通常不需要登录
             )
             db.add(warehouse)
-            print("✓ 创建仓库用户")
+            print("[OK] 创建仓库用户")
             print("  EHR号: 1000000")
             print("  姓名: 仓库")
         else:
-            print("✓ 仓库用户已存在")
+            print("[OK] 仓库用户已存在")
         
         # 创建默认资产大类
         categories = ["办公用品", "电子设备配件", "家具", "其他"]
@@ -57,7 +57,7 @@ def init_database():
             if not existing:
                 category = AssetCategory(name=cat_name)
                 db.add(category)
-                print(f"✓ 创建资产大类: {cat_name}")
+                print(f"[OK] 创建资产大类: {cat_name}")
         
         db.commit()
         print("\n数据库初始化完成！")

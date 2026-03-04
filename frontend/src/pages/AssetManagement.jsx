@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import ResizableTitle from '../components/ResizableTitle'
+import { parseSafetyCheckError } from '../utils/safetyCheckError'
 import dayjs from 'dayjs'
 
 const AssetManagement = () => {
@@ -201,7 +202,17 @@ const AssetManagement = () => {
         fetchEditRequests()
       }
     } catch (error) {
-      message.error(error.response?.data?.detail || '操作失败')
+      const { isSafetyCheck, message: msg } = parseSafetyCheckError(error)
+      if (isSafetyCheck) {
+        Modal.warning({
+          title: '需要先完成数据安全检查',
+          content: msg,
+          okText: '前往我的检查任务',
+          onOk: () => navigate('/my-safety-check-tasks')
+        })
+      } else {
+        message.error(msg)
+      }
     }
   }
 

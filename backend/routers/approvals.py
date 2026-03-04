@@ -185,10 +185,10 @@ async def approve_request(
                     raise HTTPException(status_code=500, detail="仓库用户不存在，请先初始化数据库")
                 
                 # 根据三种情况处理
-                # 注意：无论哪种情况，审批通过后资产状态都变为"库存备用"
+                # 注意：无论哪种情况，审批通过后资产状态都变为"在库"
                 if changed_user:
                     # 情况1：申请人修改了保管人
-                    # 状态变为"库存备用"，其他字段按照申请人修改的内容修改
+                    # 状态变为"在库"，其他字段按照申请人修改的内容修改
                     new_user = db.query(User).filter(User.id == request.new_user_id).first()
                     if new_user:
                         asset.user_id = request.new_user_id
@@ -204,15 +204,15 @@ async def approve_request(
                     asset.seat_number = request.seat_number
                     asset.remark = request.remark
                     
-                    # 状态变为"库存备用"
-                    asset.status = "库存备用"
+                    # 状态变为"在库"
+                    asset.status = "在库"
                     
                 elif has_changes:
                     # 情况2：申请人未修改保管人但修改了其他信息
                     # 保管人改为"仓库"用户，其他内容按照申请人修改的内容修改
                     asset.user_id = warehouse_user.id
                     asset.user_group = warehouse_user.group
-                    asset.status = "库存备用"
+                    asset.status = "在库"
                     
                     # 更新申请人修改的字段（包括null值）
                     asset.mac_address = request.mac_address
@@ -227,7 +227,7 @@ async def approve_request(
                     # 保管人改为"仓库"用户，除状态外其他内容不变
                     asset.user_id = warehouse_user.id
                     asset.user_group = warehouse_user.group
-                    asset.status = "库存备用"
+                    asset.status = "在库"
                     # 其他字段保持不变
                 
                 # 将该资产未完成的安全检查任务标记为已退库
@@ -261,11 +261,11 @@ async def approve_request(
                     
                     # 构建描述
                     if changed_user:
-                        desc = f"审批通过资产退回：保管人改为 {new_user_obj.real_name if new_user_obj else ''}，状态改为库存备用，其他字段按申请人修改"
+                        desc = f"审批通过资产退回：保管人改为 {new_user_obj.real_name if new_user_obj else ''}，状态改为在库，其他字段按申请人修改"
                     elif has_changes:
-                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为库存备用，字段按申请人修改"
+                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为在库，字段按申请人修改"
                     else:
-                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为库存备用"
+                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为在库"
                     
                     create_history(
                         db=db,
@@ -373,8 +373,8 @@ async def approve_request(
                         task_asset.assigned_user_id = edit_data["user_id"]
                         logger.info(f"资产编辑审批：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {new_user.real_name if new_user else ''}")
                 
-                # 如果状态改为"库存备用"，将未完成的安全检查任务标记为已退库
-                if "status" in changed_fields and asset.status == "库存备用":
+                # 如果状态改为"在库"，将未完成的安全检查任务标记为已退库
+                if "status" in changed_fields and asset.status == "在库":
                     pending_task_assets = db.query(TaskAsset).filter(
                         TaskAsset.asset_id == asset.id,
                         TaskAsset.status == "pending"

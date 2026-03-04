@@ -32,6 +32,7 @@ async def get_assets(
     category_id: Optional[int] = None,
     status: Optional[str] = None,
     user_id: Optional[int] = None,
+    in_stock: Optional[bool] = Query(None, description="筛选在库资产（user_id=仓库用户）"),
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -39,6 +40,14 @@ async def get_assets(
     """获取资产列表，支持筛选"""
     # 只查询未删除的资产
     query = db.query(Asset).filter(Asset.deleted_at.is_(None))
+    
+    # 在库筛选：筛选归属仓库用户的资产（方案乙）
+    if in_stock:
+        warehouse_user = db.query(User).filter(User.ehr_number == "1000000").first()
+        if warehouse_user:
+            query = query.filter(Asset.user_id == warehouse_user.id)
+        else:
+            query = query.filter(Asset.user_id.is_(None))  # 无仓库用户时退化为空结果
     
     # 管理员可以筛选指定用户的资产
     if user_id is not None:
@@ -403,8 +412,8 @@ async def update_asset(
             task_asset.assigned_user_id = asset_data.user_id
             logger.info(f"资产编辑：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {new_user.real_name if new_user else ''}")
     
-    # 如果状态改为"库存备用"，将未完成的安全检查任务标记为已退库
-    if "status" in changed_fields and asset.status == "库存备用":
+    # 如果状态改为"在库"，将未完成的安全检查任务标记为已退库
+    if "status" in changed_fields and asset.status == "在库":
         pending_task_assets = db.query(TaskAsset).filter(
             TaskAsset.asset_id == asset.id,
             TaskAsset.status == "pending"
@@ -505,7 +514,7 @@ async def import_assets(
     """
     批量导入资产（仅管理员）
     Excel格式要求：
-    - 列名：资产编号、所属大类、实物名称、规格型号（可选）、状态（在用/库存备用）、
+    - 列名：资产编号、所属大类、实物名称、规格型号（可选）、状态（在用/在库）、
             MAC地址（可选）、IP地址（可选）、存放办公地点（可选）、存放楼层（可选）、
             座位号（可选）、使用人EHR号（可选）、组别/使用人组别（可选）、备注说明（可选）
     """
@@ -563,6 +572,8 @@ async def import_assets(
                 # 获取其他字段
                 specification = str(row.get('规格型号', '')).strip() if '规格型号' in df.columns else None
                 status = str(row.get('状态', '在用')).strip() if '状态' in df.columns else '在用'
+                if status == '库存备用':
+                    status = '在库'  # 统一表述
                 mac_address = str(row.get('MAC地址', '')).strip() if 'MAC地址' in df.columns else None
                 ip_address = str(row.get('IP地址', '')).strip() if 'IP地址' in df.columns else None
                 office_location = str(row.get('存放办公地点', '')).strip() if '存放办公地点' in df.columns else None

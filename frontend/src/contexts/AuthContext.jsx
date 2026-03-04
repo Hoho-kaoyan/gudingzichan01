@@ -85,7 +85,9 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     checkEHR,
-    isAdmin: user?.role === 'admin'
+    isAdmin: user?.role === 'admin',
+    isLeader: user?.role === 'leader',
+    isAdminOrLeader: user?.role === 'admin' || user?.role === 'leader'
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -12,10 +12,14 @@ BASE_DIR = Path(__file__).resolve().parent
 DATABASE_PATH = BASE_DIR / "assets.db"
 SQLALCHEMY_DATABASE_URL = f"sqlite:///{DATABASE_PATH}"
 
-# 创建数据库引擎
+# 创建数据库引擎（增加 timeout 缓解磁盘/锁导致的 I/O 错误）
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, 
-    connect_args={"check_same_thread": False}  # SQLite需要这个参数
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={
+        "check_same_thread": False,
+        "timeout": 30,
+    },
+    pool_pre_ping=True,
 )
 
 # 创建会话工厂

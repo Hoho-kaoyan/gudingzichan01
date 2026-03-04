@@ -1,13 +1,18 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag, AutoComplete } from 'antd'
 import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
+import { parseSafetyCheckError } from '../utils/safetyCheckError'
 
 const { Option } = Select
 
+const MY_TASKS_PATH = '/my-safety-check-tasks'
+
 const TransferManagement = () => {
+  const navigate = useNavigate()
   const { user: currentUser, isAdmin } = useAuth()
   const { refreshPendingConfirmations, refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
@@ -104,10 +109,19 @@ const TransferManagement = () => {
       message.success('交接申请已提交')
       setModalVisible(false)
       fetchTransfers()
-      // 刷新侧边栏的待确认数量（如果当前用户是转入人）
       refreshPendingConfirmations()
     } catch (error) {
-      message.error(error.response?.data?.detail || '提交失败')
+      const { isSafetyCheck, message: msg } = parseSafetyCheckError(error)
+      if (isSafetyCheck) {
+        Modal.warning({
+          title: '需要先完成数据安全检查',
+          content: msg,
+          okText: '前往我的检查任务',
+          onOk: () => navigate(MY_TASKS_PATH)
+        })
+      } else {
+        message.error(msg)
+      }
     }
   }
 
@@ -140,14 +154,22 @@ const TransferManagement = () => {
       setConfirmModalVisible(false)
       setCurrentTransfer(null)
       fetchTransfers()
-      // 刷新侧边栏的待确认数量
       refreshPendingConfirmations()
-      // 如果确认了，也会影响待审批数量（转入人确认后进入待审批状态）
-      if (confirmed) {
-        refreshPendingApprovals()
-      }
+      if (confirmed) refreshPendingApprovals()
     } catch (error) {
-      message.error(error.response?.data?.detail || '操作失败')
+      const { isSafetyCheck, message: msg } = parseSafetyCheckError(error)
+      if (isSafetyCheck) {
+        setConfirmModalVisible(false)
+        setCurrentTransfer(null)
+        Modal.warning({
+          title: '需要先完成数据安全检查',
+          content: msg,
+          okText: '前往我的检查任务',
+          onOk: () => navigate(MY_TASKS_PATH)
+        })
+      } else {
+        message.error(msg)
+      }
     }
   }
 

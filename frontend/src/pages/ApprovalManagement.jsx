@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Table, Tabs, Button, Modal, Form, Input, message, Tag, Space, Descriptions, Divider } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useTransfer } from '../contexts/TransferContext'
+import { parseSafetyCheckError } from '../utils/safetyCheckError'
+
+const MY_TASKS_PATH = '/my-safety-check-tasks'
 
 const ApprovalManagement = () => {
+  const navigate = useNavigate()
   const { refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
   const [returns, setReturns] = useState([])
@@ -99,10 +104,20 @@ const ApprovalManagement = () => {
       fetchTransfers()
       fetchReturns()
       fetchEdits()
-      // 刷新侧边栏的待审批数量
       refreshPendingApprovals()
     } catch (error) {
-      message.error(error.response?.data?.detail || '审批失败')
+      const { isSafetyCheck, message: msg } = parseSafetyCheckError(error)
+      if (isSafetyCheck) {
+        setApprovalModalVisible(false)
+        Modal.warning({
+          title: '需要先完成数据安全检查',
+          content: msg,
+          okText: '前往我的检查任务',
+          onOk: () => navigate(MY_TASKS_PATH)
+        })
+      } else {
+        message.error(msg)
+      }
     }
   }
 

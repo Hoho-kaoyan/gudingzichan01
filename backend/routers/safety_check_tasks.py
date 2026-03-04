@@ -58,7 +58,7 @@ async def create_task(
     # 生成任务编号
     task_number = generate_task_number(db)
     
-    # 创建任务
+    # 创建任务（管理员手动发布，来源为 manual）
     db_task = SafetyCheckTask(
         task_number=task_number,
         check_type_id=task_data.check_type_id,
@@ -66,7 +66,8 @@ async def create_task(
         description=task_data.description,
         deadline=task_data.deadline,
         created_by_id=current_user.id,
-        status="pending"
+        status="pending",
+        source="manual"
     )
     db.add(db_task)
     db.flush()  # 获取任务ID
@@ -104,6 +105,7 @@ async def create_task(
 @router.get("/", response_model=dict)
 async def get_tasks(
     status: Optional[str] = Query(None, description="任务状态筛选"),
+    source: Optional[str] = Query(None, description="任务来源筛选：manual/inbound/transfer/reallocation/resignation"),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -122,6 +124,10 @@ async def get_tasks(
     # 状态筛选
     if status:
         query = query.filter(SafetyCheckTask.status == status)
+    
+    # 任务来源筛选（角色 D：任务列表按来源筛选）
+    if source:
+        query = query.filter(SafetyCheckTask.source == source)
     
     # 总数
     total = query.count()

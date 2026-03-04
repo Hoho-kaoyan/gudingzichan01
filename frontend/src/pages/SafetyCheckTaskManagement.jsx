@@ -31,6 +31,7 @@ const SafetyCheckTaskManagement = () => {
   const [typeForm] = Form.useForm()
   const [form] = Form.useForm()
   const [filterForm] = Form.useForm()
+  const [sourceFilter, setSourceFilter] = useState('')
 
   // 联动任务配置相关状态
   const [autoConfigModalVisible, setAutoConfigModalVisible] = useState(false)
@@ -56,8 +57,9 @@ const SafetyCheckTaskManagement = () => {
     setLoading(true)
     try {
       const params = { ...filters, page: 1, limit: 100 }
+      const source = filters.source !== undefined ? filters.source : sourceFilter
+      if (source) params.source = source
       const response = await api.get('/safety-check-tasks/', { params })
-      console.log(response.data)
       setTasks(response.data.items || [])
     } catch (error) {
       message.error('获取任务列表失败')
@@ -65,6 +67,17 @@ const SafetyCheckTaskManagement = () => {
       setLoading(false)
     }
   }
+
+  // 任务来源选项与中文展示（与方案 4.1.2 一致）
+  const SOURCE_OPTIONS = [
+    { value: '', label: '全部' },
+    { value: 'manual', label: '手动发布' },
+    { value: 'inbound', label: '入库联动' },
+    { value: 'transfer', label: '交接联动' },
+    { value: 'reallocation', label: '调拨联动' },
+    { value: 'resignation', label: '离职联动' }
+  ]
+  const getSourceLabel = (source) => SOURCE_OPTIONS.find(o => o.value === source)?.label || source || '-'
 
   const fetchCheckTypes = async () => {
     try {
@@ -448,6 +461,13 @@ const SafetyCheckTaskManagement = () => {
       render: (_, record) => record.check_type?.name || '-'
     },
     {
+      title: '任务来源',
+      dataIndex: 'source',
+      key: 'source',
+      width: 120,
+      render: (source) => <Tag>{getSourceLabel(source)}</Tag>
+    },
+    {
       title: '进度',
       key: 'progress',
       width: 150,
@@ -525,9 +545,21 @@ const SafetyCheckTaskManagement = () => {
 
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h2>安全检查任务管理</h2>
-        <Space>
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+        <h2 style={{ margin: 0 }}>安全检查任务管理</h2>
+        <Space wrap>
+          <span>任务来源：</span>
+          <Select
+            value={sourceFilter || undefined}
+            onChange={(v) => {
+              setSourceFilter(v || '')
+              fetchTasks({ source: v || undefined })
+            }}
+            options={SOURCE_OPTIONS}
+            style={{ width: 140 }}
+            placeholder="全部"
+            allowClear
+          />
           <Button icon={<SettingOutlined />} onClick={handleOpenTypeManagement}>
             检查类型管理
           </Button>

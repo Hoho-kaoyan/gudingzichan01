@@ -74,7 +74,7 @@ def init_database():
             if not existing:
                 category = AssetCategory(name=cat_name)
                 db.add(category)
-                print(f"✓ 创建资产大类: {cat_name}")
+                print(f"[OK] 创建资产大类: {cat_name}")
         
         db.commit()
         print("\n数据库初始化完成！")

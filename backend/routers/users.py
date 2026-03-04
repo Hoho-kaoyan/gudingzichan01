@@ -176,7 +176,13 @@ async def import_users(
             row_data = row.to_dict()  # 保存原始行数据
             
             try:
-                ehr_number = str(row['EHR号']).strip()
+                # 处理可能被 pandas 识别为浮点数的 EHR 号 (例如 1234561.0 -> 1234561)
+                raw_ehr = str(row['EHR号']).strip()
+                if raw_ehr.endswith('.0'):
+                    ehr_number = raw_ehr[:-2]
+                else:
+                    ehr_number = raw_ehr
+                    
                 real_name = str(row['姓名']).strip()
                 group = str(row['组别']).strip()
                 role = str(row.get('角色', 'user')).strip() if '角色' in df.columns else 'user'

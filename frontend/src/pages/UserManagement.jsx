@@ -93,7 +93,7 @@ const UserManagement = () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       const { success_count, error_count, errors, error_details } = response.data
-      
+
       if (error_count > 0) {
         // 如果有错误，显示错误详情模态框
         setImportErrors(error_details || errors.map((err, idx) => ({
@@ -133,7 +133,11 @@ const UserManagement = () => {
       title: '角色',
       dataIndex: 'role',
       key: 'role',
-      render: (role) => role === 'admin' ? '管理员' : '普通用户'
+      render: (role) => {
+        if (role === 'admin') return '管理员'
+        if (role === 'leader') return '组长'
+        return '普通用户'
+      }
     },
     {
       title: '操作',
@@ -197,6 +201,7 @@ const UserManagement = () => {
         <Form.Item label="角色" name="role">
           <Select placeholder="全部" style={{ width: 120 }} allowClear>
             <Select.Option value="admin">管理员</Select.Option>
+            <Select.Option value="leader">组长</Select.Option>
             <Select.Option value="user">普通用户</Select.Option>
           </Select>
         </Form.Item>
@@ -261,6 +266,7 @@ const UserManagement = () => {
           >
             <Select>
               <Select.Option value="user">普通用户</Select.Option>
+              <Select.Option value="leader">组长</Select.Option>
               <Select.Option value="admin">管理员</Select.Option>
             </Select>
           </Form.Item>

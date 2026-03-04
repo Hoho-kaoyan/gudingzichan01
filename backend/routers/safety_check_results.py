@@ -252,6 +252,26 @@ async def submit_check_result(
     if pending_count == 0:
         task.status = "completed"
         task.completed_at = datetime.now()
+        
+        # 【新增：检测有无延迟生效的调拨记录，若有则立刻放行生效】
+        if task.source == "reallocation":
+            from models import PendingReallocation
+            # 找到这份任务关联的所有“调拨待办”
+            pendings = db.query(PendingReallocation).filter(PendingReallocation.task_id == task.id).all()
+            for pending in pendings:
+                asset_to_update = db.query(Asset).filter(Asset.id == pending.asset_id).first()
+                if asset_to_update:
+                    asset_to_update.user_id = pending.new_user_id
+                    # 更新所在组别
+                    new_user = db.query(User).filter(User.id == pending.new_user_id).first()
+                    if new_user:
+                        asset_to_update.user_group = new_user.group
+                    
+                    from logger import logger
+                    logger.info(f"安全检查任务[{task.task_number}]完成，资产[{asset_to_update.asset_number}]调拨正式生效，移交予ID为[{pending.new_user_id}]的用户")
+                
+                # 阅后即焚，删掉临时占位的记录
+                db.delete(pending)
     
     db.commit()
     

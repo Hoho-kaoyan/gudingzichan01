@@ -262,16 +262,26 @@ async def update_asset(
         raise HTTPException(status_code=404, detail="资产不存在")
     
     # 普通用户只能编辑自己名下的资产
-    if current_user.role != "admin" and asset.user_id != current_user.id:
+    if current_user.role == "user" and asset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="只能编辑自己名下的资产")
+        
+    # 组长只能编辑本组所在的资产
+    if current_user.role == "leader" and asset.user_group != current_user.group:
+        raise HTTPException(status_code=403, detail="组长只能编辑本组关联的资产")
     
     # 普通用户不能修改使用人
-    if current_user.role != "admin" and asset_data.user_id is not None:
+    if current_user.role == "user" and asset_data.user_id is not None:
         if asset_data.user_id != asset.user_id:
             raise HTTPException(status_code=403, detail="普通用户不能修改资产使用人")
+            
+    # 组长如果修改使用人，新使用人必须与组长同组
+    if current_user.role == "leader" and asset_data.user_id is not None and asset_data.user_id != asset.user_id:
+        new_usr = db.query(User).filter(User.id == asset_data.user_id).first()
+        if not new_usr or new_usr.group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能将资产分配给本组人员")
     
     # 如果是普通用户，提交编辑申请而不是直接更新
-    if current_user.role != "admin":
+    if current_user.role == "user":
         import json
         from models import AssetEditRequest
         
@@ -358,7 +368,7 @@ async def update_asset(
             content={"message": "编辑申请已提交，等待管理员审批", "edit_request_id": db_request.id}
         )
     
-    # 管理员直接更新资产
+    # 管理员和组长直接更新资产
     # 记录旧值
     old_values = {
         "name": asset.name,
@@ -376,32 +386,46 @@ async def update_asset(
     
     # 更新字段
     update_data = asset_data.dict(exclude_unset=True)
+    
+    # 【改动：延迟调拨生效拦截】
+    is_reallocation = False
+    new_user_id = asset_data.user_id
+    if "user_id" in update_data and new_user_id != old_values.get("user_id"):
+        is_reallocation = True
+        del update_data["user_id"]
+        if "user_group" in update_data:
+            del update_data["user_group"] # 等调拨生效时一起改
+
     changed_fields = []
     for field, value in update_data.items():
         old_val = getattr(asset, field, None)
         if old_val != value:
             setattr(asset, field, value)
             changed_fields.append(field)
-    
-    # 如果更新了使用人，自动更新组别
+            
+    # 【新增：延迟调用和安检派发】
     old_user_id = old_values.get("user_id")
-    if asset_data.user_id is not None:
-        user = db.query(User).filter(User.id == asset_data.user_id).first()
-        if user:
-            asset.user_group = user.group
-    
-    # 处理安全检查任务
-    # 如果修改了使用人，更新未完成的安全检查任务到新接收人
-    if "user_id" in changed_fields and asset_data.user_id is not None and asset_data.user_id != old_user_id:
-        pending_task_assets = db.query(TaskAsset).filter(
-            TaskAsset.asset_id == asset.id,
-            TaskAsset.status == "pending"
-        ).all()
-        
-        new_user = db.query(User).filter(User.id == asset_data.user_id).first()
-        for task_asset in pending_task_assets:
-            task_asset.assigned_user_id = asset_data.user_id
-            logger.info(f"资产编辑：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {new_user.real_name if new_user else ''}")
+    if is_reallocation:
+        from models import PendingReallocation
+        # 如果原来有使用人，派发给旧人查（转出核验）；如果没人在库房（如新资产），派发给新人（入职上岗核验）
+        allocated_user_id = old_user_id if old_user_id else new_user_id
+        if allocated_user_id:
+            try:
+                task = create_system_allocated_task(
+                    db=db,
+                    asset_id=asset.id,
+                    assigned_user_id=allocated_user_id,
+                    source="reallocation"
+                )
+                pending = PendingReallocation(
+                    asset_id=asset.id,
+                    new_user_id=new_user_id,
+                    task_id=task.id
+                )
+                db.add(pending)
+                logger.info(f"生成待生效调拨记录：资产 {asset.asset_number} 拟移交至新用户ID {new_user_id}")
+            except Exception as e:
+                logger.error(f"调拨时触发系统安检任务下发失败: {e}", exc_info=True)
     
     # 如果状态改为"库存备用"，将未完成的安全检查任务标记为已退库
     if "status" in changed_fields and asset.status == "库存备用":
@@ -415,20 +439,29 @@ async def update_asset(
             logger.info(f"资产编辑：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
     
     # 记录编辑历史
-    if changed_fields:
+    if changed_fields or is_reallocation:
         try:
             # 导入字段名映射函数
             from routers.asset_history import get_field_label
             field_labels = [get_field_label(field) for field in changed_fields]
+            if is_reallocation:
+                field_labels.append("使用人(待安检生效)")
         except Exception as e:
             logger.error(f"导入字段名映射函数失败: {e}", exc_info=True)
             # 如果导入失败，使用原始字段名
             field_labels = changed_fields
+            if is_reallocation:
+                field_labels.append("user_id(待结案生效)")
         
-        logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 编辑资产: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(field_labels)}")
+        logger.info(f"管理员/组长 {current_user.ehr_number}({current_user.real_name}) 编辑资产: {asset.asset_number} - {asset.name}, 修改字段: {', '.join(field_labels)}")
         try:
             create_history = get_create_history_record()
             new_values = {field: getattr(asset, field) for field in changed_fields}
+            
+            # 把被截留的新主人放进前端历史记录显示面板里
+            if is_reallocation:
+                new_values["user_id(待结案生效)"] = new_user_id
+                
             create_history(
                 db=db,
                 asset_id=asset.id,
@@ -568,7 +601,13 @@ async def import_assets(
                 office_location = str(row.get('存放办公地点', '')).strip() if '存放办公地点' in df.columns else None
                 floor = str(row.get('存放楼层', '')).strip() if '存放楼层' in df.columns else None
                 seat_number = str(row.get('座位号', '')).strip() if '座位号' in df.columns else None
-                user_ehr = str(row.get('使用人EHR号', '')).strip() if '使用人EHR号' in df.columns else None
+                # 处理被 pandas 识别为浮点数的 EHR 号 (1234561.0 -> 1234561)
+                raw_user_ehr = str(row.get('使用人EHR号', '')).strip() if '使用人EHR号' in df.columns else ''
+                if raw_user_ehr.endswith('.0'):
+                    user_ehr = raw_user_ehr[:-2]
+                else:
+                    user_ehr = raw_user_ehr
+                    
                 # 支持两种列名：使用人组别 或 组别
                 user_group = None
                 if '使用人组别' in df.columns:

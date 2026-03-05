@@ -86,7 +86,8 @@
 │   │   ├── stats.py        # 统计信息
 │   │   ├── safety_check_types.py    # 安全检查类型管理
 │   │   ├── safety_check_tasks.py    # 安全检查任务管理
-│   │   └── safety_check_results.py  # 安全检查结果提交
+│   │   ├── safety_check_results.py  # 安全检查结果提交
+│   │   └── safety_check_auto_config.py  # 联动安全检查配置（默认类型、实物名称→检查类型映射）
 │   ├── models.py           # 数据库模型
 │   ├── schemas.py          # Pydantic模式
 │   ├── auth.py             # 认证工具
@@ -106,8 +107,9 @@
 │   │   │   ├── TransferManagement.jsx  # 资产交接
 │   │   │   ├── ReturnManagement.jsx    # 资产退回
 │   │   │   ├── ApprovalManagement.jsx  # 审批管理
-│   │   │   ├── SafetyCheckTaskManagement.jsx  # 安全检查任务管理（管理员）
-│   │   │   └── MySafetyCheckTasks.jsx  # 我的检查任务（普通用户）
+│   │   │   ├── SafetyCheckTaskManagement.jsx  # 安全检查任务管理（管理员，含检查类型管理弹窗与联动配置弹窗）
+│   │   │   ├── MySafetyCheckTasks.jsx  # 我的检查任务（普通用户）
+│   │   │   └── SafetyCheckTypeManagement.jsx  # 检查类型管理独立组件（当前未挂路由，功能在任务管理页弹窗内）
 │   │   ├── components/     # 公共组件
 │   │   │   ├── Layout.jsx      # 布局组件
 │   │   │   ├── PrivateRoute.jsx # 路由守卫
@@ -230,7 +232,10 @@ npm run dev
 2. 选择要交接的资产
 3. 选择转入用户
 4. 填写交接原因（可选）
-5. 提交申请，等待管理员审批
+5. 提交申请，状态为「待转入人确认」
+6. **转入人**在资产交接页面找到该申请，点击「确认」或「拒绝」
+7. 转入人确认接收后，状态变为「待审批」；管理员在审批管理页面审批
+8. 管理员批准后，资产使用人更新为转入用户；拒绝则申请结束
 
 ### 资产退回
 
@@ -369,6 +374,14 @@ npm run dev
 - `GET /api/safety-check-results/task/{task_id}/assets` - 获取任务资产（普通用户）
 - `POST /api/safety-check-results/submit` - 提交检查结果（普通用户）
 - `GET /api/safety-check-results/asset/{asset_id}/history` - 获取资产检查历史
+
+### 联动安全检查配置接口（管理员）
+- `GET /api/safety-check-auto-config` - 获取全局默认检查类型配置
+- `PUT /api/safety-check-auto-config` - 创建或更新全局默认检查类型
+- `GET /api/safety-check-auto-config/asset-type-mappings` - 获取「实物名称→检查类型」映射列表
+- `POST /api/safety-check-auto-config/asset-type-mappings` - 新增映射
+- `PUT /api/safety-check-auto-config/asset-type-mappings/{mapping_id}` - 更新映射
+- `DELETE /api/safety-check-auto-config/asset-type-mappings/{mapping_id}` - 删除映射
 
 ## 数据库初始化
 

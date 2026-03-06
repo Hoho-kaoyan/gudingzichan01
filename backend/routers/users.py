@@ -112,6 +112,9 @@ async def update_user(
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
+    # 记录旧状态
+    old_status = user.status
+    
     # 更新字段
     if user_data.real_name is not None:
         user.real_name = user_data.real_name
@@ -123,6 +126,28 @@ async def update_user(
         user.status = user_data.status
     if user_data.password is not None:
         user.password_hash = get_password_hash(user_data.password)
+    
+    # 【新增：若变更为离职状态，触发全量资产安检下发】
+    if old_status != "离职" and user.status == "离职":
+        from models import Asset
+        from safety_check_linkage import create_system_allocated_task
+        from logger import logger
+        
+        assets = db.query(Asset).filter(
+            Asset.user_id == user.id,
+            Asset.deleted_at.is_(None)
+        ).all()
+        
+        for asset_item in assets:
+            try:
+                create_system_allocated_task(
+                    db=db,
+                    asset_id=asset_item.id,
+                    assigned_user_id=user.id,
+                    source="resignation"
+                )
+            except Exception as e:
+                logger.error(f"处理员工离职下发资产全量安检任务失败 (资产 {asset_item.asset_number}): {e}", exc_info=True)
     
     db.commit()
     db.refresh(user)
@@ -165,6 +190,9 @@ async def import_users(
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
+        # 将空单元格 (NaN) 全部替换为空字符串
+        df = df.fillna('')
+        
         # 验证必需的列
         required_columns = ['EHR号', '姓名', '组别']
         for col in required_columns:
@@ -196,6 +224,9 @@ async def import_users(
                 role = str(row.get('角色', 'user')).strip() if '角色' in df.columns else 'user'
                 status = str(row.get('状态', '在岗')).strip() if '状态' in df.columns else '在岗'
                 password = str(row.get('密码', '123456')).strip() if '密码' in df.columns else '123456'
+                
+                if not ehr_number or not real_name or not group:
+                    raise ValueError("EHR号、姓名、组别均不能为空")
                 
                 # 验证EHR号
                 if len(ehr_number) != 7 or not ehr_number.isdigit():

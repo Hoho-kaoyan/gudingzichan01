@@ -14,6 +14,19 @@ def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 
+def check_any_unfinished_tasks_for_user(db: Session, user_id: int):
+    """全局检查该用户是否存在任意一笔未完成的安检单"""
+    from models import TaskAsset
+    unfinished = db.query(TaskAsset).filter(
+        TaskAsset.assigned_user_id == user_id,
+        TaskAsset.status.in_(["pending", "overdue"])
+    ).first()
+    if unfinished:
+        raise HTTPException(
+            status_code=400, 
+            detail="您有未完成的数据安检要求，请先处理后重试"
+        )
+
 router = APIRouter()
 
 
@@ -135,8 +148,12 @@ async def create_return_request(
         if not new_user:
             raise HTTPException(status_code=404, detail="指定的保管人不存在")
     
-    # 创建退回申请，保存申请人修改的字段
     user_id = asset.user_id or current_user.id
+    
+    # 【全局离职逃逸拦截】如有任何未结任务，则不允许提交退回业务
+    check_any_unfinished_tasks_for_user(db, user_id)
+    
+    # 创建退回申请，保存申请人修改的字段
     db_request = ReturnRequest(
         asset_id=return_data.asset_id,
         user_id=user_id,

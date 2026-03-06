@@ -34,6 +34,22 @@ def check_unfinished_tasks_for_asset_user(db: Session, asset_id: int, user_id: i
             detail="请先由当前所有人完成数据安全检查"
         )
 
+def check_any_unfinished_tasks_for_user(db: Session, user_id: int):
+    """
+    全局检查：只要该用户在名下任何资产中存在任意一笔未完成的安检单（pending/overdue），
+    直接判定不合规并抛出拦截。
+    """
+    from models import TaskAsset
+    unfinished = db.query(TaskAsset).filter(
+        TaskAsset.assigned_user_id == user_id,
+        TaskAsset.status.in_(["pending", "overdue"])
+    ).first()
+    if unfinished:
+        raise HTTPException(
+            status_code=400, 
+            detail="您有未完成的数据安检要求，请先处理后重试"
+        )
+
 router = APIRouter()
 
 
@@ -162,6 +178,9 @@ async def create_transfer_request(
     # 检查资产是否属于当前用户（普通用户只能交接自己的资产）
     if current_user.role != "admin" and asset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
+
+    # 【干预点0：全局离职逃逸拦截 - 该用户如有任何未结案件，都不允许发起新的流转】
+    check_any_unfinished_tasks_for_user(db, from_user_id)
 
     # 【干预点1：创建交接申请前，拦截未完成安检】
     check_unfinished_tasks_for_asset_user(db, asset.id, from_user_id)

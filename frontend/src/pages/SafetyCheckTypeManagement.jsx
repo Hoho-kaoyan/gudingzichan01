@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Switch, message, Popconfirm, Space } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Switch, message, Popconfirm, Space, Card, Select, Divider, Alert } from 'antd'
+import { PlusOutlined, EditOutlined, DeleteOutlined, SettingOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -9,14 +9,22 @@ const { TextArea } = Input
 const SafetyCheckTypeManagement = () => {
   const { isAdmin } = useAuth()
   const [checkTypes, setCheckTypes] = useState([])
+  const [categories, setCategories] = useState([])
+  const [autoConfig, setAutoConfig] = useState({ default_type_id: null })
+  const [mappings, setMappings] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
+  const [mappingModalVisible, setMappingModalVisible] = useState(false)
   const [editingType, setEditingType] = useState(null)
   const [form] = Form.useForm()
+  const [mappingForm] = Form.useForm()
 
   useEffect(() => {
     if (isAdmin) {
       fetchCheckTypes()
+      fetchCategories()
+      fetchAutoConfig()
+      fetchMappings()
     }
   }, [isAdmin])
 
@@ -29,6 +37,72 @@ const SafetyCheckTypeManagement = () => {
       message.error('获取检查类型列表失败')
     } finally {
       setLoading(false)
+    }
+  }
+
+  const fetchCategories = async () => {
+    try {
+      const response = await api.get('/categories/')
+      setCategories(response.data)
+    } catch (error) {
+      console.error('获取资产大类失败:', error)
+    }
+  }
+
+  const fetchAutoConfig = async () => {
+    try {
+      const response = await api.get('/safety-check-auto-config/')
+      setAutoConfig(response.data || { default_type_id: null })
+    } catch (error) {
+      console.error('获取自动配置失败:', error)
+    }
+  }
+
+  const fetchMappings = async () => {
+    try {
+      const response = await api.get('/safety-check-auto-config/asset-type-mappings')
+      setMappings(response.data || [])
+    } catch (error) {
+      console.error('获取映射列表失败:', error)
+    }
+  }
+
+  const handleUpdateDefaultType = async (value) => {
+    try {
+      await api.put('/safety-check-auto-config', { default_check_type_id: value })
+      message.success('默认检查类型已更新')
+      fetchAutoConfig()
+    } catch (error) {
+      message.error('更新失败')
+    }
+  }
+
+  const handleAddMapping = async (values) => {
+    try {
+      // 后端逻辑映射是基于 asset_type 字符串，这里将选取的大类 ID 转换为名称
+      const category = categories.find(c => c.id === values.category_id)
+      if (!category) return
+
+      await api.post('/safety-check-auto-config/asset-type-mappings', {
+        asset_type: category.name,
+        check_type_id: values.check_type_id
+      })
+      message.success('映射添加成功')
+      setMappingModalVisible(false)
+      mappingForm.resetFields()
+      fetchMappings()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '添加失败')
+    }
+  }
+
+  const handleDeleteMapping = async (id) => {
+    try {
+      await api.delete(`/safety-check-auto-config/asset-type-mappings/${id}`)
+      message.success('映射已删除')
+      fetchMappings()
+    } catch (error) {
+      message.error('删除失败')
     }
   }
 
@@ -144,10 +218,65 @@ const SafetyCheckTypeManagement = () => {
     }
   ]
 
+  const mappingColumns = [
+    {
+      title: '资产大类',
+      dataIndex: ['category', 'name'],
+      key: 'category'
+    },
+    {
+      title: '联动检查类型',
+      dataIndex: ['check_type', 'name'],
+      key: 'check_type'
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_, record) => (
+        <Popconfirm title="确定删除此映射吗？" onConfirm={() => handleDeleteMapping(record.id)}>
+          <Button type="link" danger icon={<DeleteOutlined />} size="small" />
+        </Popconfirm>
+      )
+    }
+  ]
+
   return (
     <div>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <h2>安全检查类型管理</h2>
+      <div style={{ marginBottom: 16 }}>
+        <h2>安全检查联动配置</h2>
+        <Alert
+          message="配置说明"
+          description="在此配置资产管理与安全检查的自动化联动规则。当管理员标记用户离职时，系统将根据配置自动创建检查任务。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <Card size="small" title="基础配置" style={{ marginBottom: 16 }}>
+          <Space align="center" size="large">
+            <span>
+              <strong>默认检查类型：</strong>
+              <Select
+                placeholder="请选择离职时的默认检查类型"
+                style={{ width: 250, marginLeft: 8 }}
+                value={autoConfig.default_type_id}
+                onChange={handleUpdateDefaultType}
+                allowClear
+              >
+                {checkTypes.map(t => (
+                  <Select.Option key={t.id} value={t.id}>{t.name}</Select.Option>
+                ))}
+              </Select>
+            </span>
+            <Button type="primary" ghost icon={<SettingOutlined />} onClick={() => setMappingModalVisible(true)}>
+              管理大类映射
+            </Button>
+          </Space>
+        </Card>
+      </div>
+
+      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h3>检查类型库</h3>
         <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
           新增检查类型
         </Button>
@@ -159,8 +288,50 @@ const SafetyCheckTypeManagement = () => {
         rowKey="id"
         loading={loading}
         scroll={{ x: 1000 }}
+        size="small"
+        bordered
       />
 
+      {/* 映射管理 Modal */}
+      <Modal
+        title="资产大类 - 检查类型映射管理"
+        open={mappingModalVisible}
+        onCancel={() => setMappingModalVisible(false)}
+        footer={null}
+        width={600}
+      >
+        <div style={{ marginBottom: 16 }}>
+          <Form form={mappingForm} layout="inline" onFinish={handleAddMapping}>
+            <Form.Item name="category_id" rules={[{ required: true, message: '选择大类' }]}>
+              <Select placeholder="选择资产大类" style={{ width: 180 }}>
+                {categories.map(c => (
+                  <Select.Option key={c.id} value={c.id}>{c.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item name="check_type_id" rules={[{ required: true, message: '选择类型' }]}>
+              <Select placeholder="选择检查类型" style={{ width: 180 }}>
+                {checkTypes.map(t => (
+                  <Select.Option key={t.id} value={t.id}>{t.name}</Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+            <Form.Item>
+              <Button type="primary" htmlType="submit">添加映射</Button>
+            </Form.Item>
+          </Form>
+        </div>
+        <Table
+          columns={mappingColumns}
+          dataSource={mappings}
+          rowKey="id"
+          size="small"
+          pagination={false}
+          bordered
+        />
+      </Modal>
+
+      {/* 编辑/新增检查类型 Modal */}
       <Modal
         title={editingType ? '编辑检查类型' : '新增检查类型'}
         open={modalVisible}

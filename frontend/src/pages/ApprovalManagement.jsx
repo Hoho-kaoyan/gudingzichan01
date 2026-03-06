@@ -88,6 +88,8 @@ const ApprovalManagement = () => {
     setCurrentRequest({ ...request, type })
     setApprovalDecision(true)
     form.setFieldsValue({ approved: true, comment: '' })
+    fetchCategories()
+    fetchUsers()
     setApprovalModalVisible(true)
   }
 

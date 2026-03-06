@@ -4,7 +4,7 @@ Pydantic模式定义
 """
 from pydantic import BaseModel, Field, validator, field_validator
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, date
 from enum import Enum
 import json
 
@@ -104,6 +104,28 @@ class AssetBase(BaseModel):
     user_id: Optional[int] = Field(None, description="使用人ID")
     user_group: Optional[str] = Field(None, description="使用人组别")
     remark: Optional[str] = Field(None, description="备注说明（非必填）")
+    quantity: Optional[int] = Field(None, description="件数")
+    team: Optional[str] = Field(None, description="所在团队")
+    purchase_date: Optional[date] = Field(None, description="购置日期")
+    card_number: Optional[str] = Field(None, description="卡片编号")
+    safety_check_executor_id: Optional[int] = Field(None, description="安全检查执行人ID")
+    safety_check_executor_name: Optional[str] = Field(None, description="安全检查执行人姓名")
+    computer_type: Optional[str] = Field(None, description="电脑类型")
+    computer_usage: Optional[str] = Field(None, description="电脑应用")
+    computer_name: Optional[str] = Field(None, description="计算机名")
+    monitor1_model: Optional[str] = Field(None, description="连接显示器1型号")
+    monitor1_asset_number: Optional[str] = Field(None, description="连接显示器1资产编号")
+    monitor1_serial: Optional[str] = Field(None, description="显示器1序列号")
+    monitor2_model: Optional[str] = Field(None, description="连接显示器2型号")
+    monitor2_asset_number: Optional[str] = Field(None, description="连接显示器2资产编号")
+    monitor2_serial: Optional[str] = Field(None, description="显示器2序列号")
+    asset_contact: Optional[str] = Field(None, description="资产管理联系人")
+    reserve_1: Optional[str] = Field(None, description="预留1")
+    reserve_2: Optional[str] = Field(None, description="预留2")
+    reserve_3: Optional[str] = Field(None, description="预留3")
+    reserve_4: Optional[str] = Field(None, description="预留4")
+    reserve_5: Optional[str] = Field(None, description="预留5")
+    reserve_6: Optional[str] = Field(None, description="预留6")
 
 
 class AssetCreate(AssetBase):
@@ -123,6 +145,28 @@ class AssetUpdate(BaseModel):
     user_id: Optional[int] = None
     user_group: Optional[str] = None
     remark: Optional[str] = None
+    quantity: Optional[int] = None
+    team: Optional[str] = None
+    purchase_date: Optional[date] = None
+    card_number: Optional[str] = None
+    safety_check_executor_id: Optional[int] = None
+    safety_check_executor_name: Optional[str] = None
+    computer_type: Optional[str] = None
+    computer_usage: Optional[str] = None
+    computer_name: Optional[str] = None
+    monitor1_model: Optional[str] = None
+    monitor1_asset_number: Optional[str] = None
+    monitor1_serial: Optional[str] = None
+    monitor2_model: Optional[str] = None
+    monitor2_asset_number: Optional[str] = None
+    monitor2_serial: Optional[str] = None
+    asset_contact: Optional[str] = None
+    reserve_1: Optional[str] = None
+    reserve_2: Optional[str] = None
+    reserve_3: Optional[str] = None
+    reserve_4: Optional[str] = None
+    reserve_5: Optional[str] = None
+    reserve_6: Optional[str] = None
 
 
 class AssetResponse(AssetBase):
@@ -131,6 +175,7 @@ class AssetResponse(AssetBase):
     updated_at: Optional[datetime] = None
     category: Optional[AssetCategoryResponse] = None
     user: Optional[UserResponse] = None
+    safety_check_executor: Optional["UserResponse"] = None
     
     class Config:
         from_attributes = True

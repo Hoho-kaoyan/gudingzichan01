@@ -13,9 +13,10 @@ const MY_TASKS_PATH = '/my-safety-check-tasks'
 
 const ReturnManagement = () => {
   const navigate = useNavigate()
-  const { user: currentUser, isAdmin } = useAuth()
+  const { user: currentUser, isAdmin, isLeader, isAdminOrLeader } = useAuth()
   const [returns, setReturns] = useState([])
   const [assets, setAssets] = useState([])
+  const [users, setUsers] = useState([])
   const [userOptions, setUserOptions] = useState([])
   const [newKeeperSearchValue, setNewKeeperSearchValue] = useState('')
   const [selectedAsset, setSelectedAsset] = useState(null)
@@ -74,6 +75,7 @@ const ReturnManagement = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users/')
+      setUsers(response.data || [])
       const options = (response.data || []).map(user => ({
         label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
         value: user.id,
@@ -116,11 +118,11 @@ const ReturnManagement = () => {
         asset_id: values.asset_id,
         reason: values.reason || undefined
       }
-      
+
       if (selectedAsset) {
         // 只提交与当前值不同的字段，空字符串转为null
         const normalizeValue = (val) => (val === '' || val === undefined) ? null : val
-        
+
         if (normalizeValue(values.mac_address) !== (selectedAsset.mac_address || null)) {
           payload.mac_address = normalizeValue(values.mac_address)
         }
@@ -143,7 +145,7 @@ const ReturnManagement = () => {
           payload.remark = normalizeValue(values.remark)
         }
       }
-      
+
       await api.post('/returns/', payload)
       message.success('退回申请已提交')
       setModalVisible(false)
@@ -217,7 +219,15 @@ const ReturnManagement = () => {
     }
   ]
 
-  const selectableAssets = isAdmin ? assets : assets.filter((asset) => asset.user?.id === currentUser?.id)
+  // 可选资产逻辑：
+  // 1. 管理员：全量在用资产
+  // 2. 组长：所属组的所有在用资产
+  // 3. 普通用户：仅个人名下的在用资产
+  const selectableAssets = isAdmin
+    ? assets
+    : isLeader
+      ? assets.filter(asset => asset.user_group === currentUser?.group)
+      : assets.filter(asset => asset.user?.id === currentUser?.id)
 
   return (
     <div>
@@ -288,7 +298,7 @@ const ReturnManagement = () => {
             name="asset_id"
             rules={[{ required: true, message: '请选择资产' }]}
           >
-            <Select 
+            <Select
               placeholder={isAdmin ? '请选择要退回的资产' : '请选择自己名下的资产'}
               onChange={handleAssetChange}
             >
@@ -304,7 +314,7 @@ const ReturnManagement = () => {
               )}
             </Select>
           </Form.Item>
-          
+
           <Form.Item
             label="退回原因"
             name="reason"
@@ -361,7 +371,15 @@ const ReturnManagement = () => {
             <AutoComplete
               value={newKeeperSearchValue}
               options={userOptions
-                .filter(option => option.ehrNumber !== '1000000')
+                .filter(option => {
+                  const isNotWarehouse = option.ehrNumber !== '1000000'
+                  // 组长发起时，新的保管人也必须是本组成员（如果指定了的话）
+                  if (currentUser?.role === 'leader') {
+                    const u = users.find(item => item.id === option.value)
+                    return isNotWarehouse && u?.group === currentUser?.group
+                  }
+                  return isNotWarehouse
+                })
                 .filter(option => option.label.toLowerCase().includes((newKeeperSearchValue || '').toLowerCase()))
                 .slice(0, 5)
                 .map(option => ({
@@ -401,7 +419,7 @@ const ReturnManagement = () => {
                 <div style={{ color: '#ff4d4f', marginTop: 4, fontSize: 12 }}>
                   此用户不存在
                 </div>
-            )}
+              )}
           </Form.Item>
 
           <Form.Item

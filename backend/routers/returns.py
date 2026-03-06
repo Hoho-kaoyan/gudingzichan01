@@ -42,8 +42,13 @@ async def get_return_requests(
     """获取退回申请列表,支持搜索"""
     query = db.query(ReturnRequest)
     
-    # 普通用户只能看到自己的申请
-    if current_user.role != "admin":
+    # 普通用户/组长权限过滤
+    if current_user.role == "leader":
+        # 组长可以看到涉及其组员的所有单据
+        user_ids_in_group = [u[0] for u in db.query(User.id).filter(User.group == current_user.group).all()]
+        query = query.filter(ReturnRequest.user_id.in_(user_ids_in_group))
+    elif current_user.role == "user":
+        # 普通用户只能看到自己的申请
         query = query.filter(ReturnRequest.user_id == current_user.id)
     
     if status:
@@ -65,8 +70,9 @@ async def get_return_requests(
         ).all()
         asset_ids = [row[0] for row in asset_results]
         
-        # 获取匹配的用户ID
+        # 获取匹配的用户ID（不含已逻辑删除用户）
         user_results = db.query(User.id).filter(
+            User.deleted_at.is_(None),
             or_(
                 User.real_name.contains(search),
                 User.ehr_number.contains(search),
@@ -138,9 +144,18 @@ async def create_return_request(
     if asset.status != "在用":
         raise HTTPException(status_code=400, detail="只能退回在用状态的资产")
     
-    # 检查资产是否属于当前用户（普通用户只能退回自己的资产）
-    if current_user.role != "admin" and asset.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="只能退回自己名下的资产")
+    # 检查权限：
+    # 1. 管理员：全量
+    # 2. 组长：只能退回本组资产
+    # 3. 普通用户：只能退回自己名下的资产
+    if current_user.role == "admin":
+        pass
+    elif current_user.role == "leader":
+        if asset.user_group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能代退本组关联的资产")
+    else:
+        if asset.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="只能退回自己名下的资产")
     
     # 如果指定了新的保管人，验证用户是否存在
     if return_data.new_user_id is not None:

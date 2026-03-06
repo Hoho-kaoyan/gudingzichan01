@@ -65,8 +65,20 @@ async def get_transfer_requests(
     """获取交接申请列表,支持搜索"""
     query = db.query(TransferRequest)
     
-    # 普通用户只能看到自己相关的申请
-    if current_user.role != "admin":
+    # 普通用户/组长权限过滤
+    if current_user.role == "leader":
+        # 组长可以看到本组用户作为转出人或转入人的所有申请
+        # 简化逻辑：获取本组所有用户的ID列表，然后过滤
+        user_ids_in_group = [u[0] for u in db.query(User.id).filter(User.group == current_user.group).all()]
+        query = query.filter(
+            or_(
+                TransferRequest.from_user_id.in_(user_ids_in_group),
+                TransferRequest.to_user_id.in_(user_ids_in_group)
+            )
+        )
+    elif current_user.role == "user":
+
+        # 普通用户只能看到自己相关的申请
         query = query.filter(
             (TransferRequest.from_user_id == current_user.id) |
             (TransferRequest.to_user_id == current_user.id)
@@ -91,8 +103,9 @@ async def get_transfer_requests(
         ).all()
         asset_ids = [row[0] for row in asset_results]
         
-        # 获取匹配的用户ID
+        # 获取匹配的用户ID（不含已逻辑删除用户）
         user_results = db.query(User.id).filter(
+            User.deleted_at.is_(None),
             or_(
                 User.real_name.contains(search),
                 User.ehr_number.contains(search),
@@ -175,9 +188,23 @@ async def create_transfer_request(
     if from_user_id == transfer_data.to_user_id:
         raise HTTPException(status_code=400, detail="不能将资产转给自己")
     
-    # 检查资产是否属于当前用户（普通用户只能交接自己的资产）
-    if current_user.role != "admin" and asset.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
+    # 检查权限：
+    # 1. 管理员：可以代任何人发起
+    # 2. 组长：只能为本组员发起，且接收人也必须是本组成员（满足用户“调拨按钮与范围限定本组”要求）
+    # 3. 普通用户：只能为自己发起
+    if current_user.role == "admin":
+        pass 
+    elif current_user.role == "leader":
+        # 验证转出资产是否属于本组
+        if asset.user_group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能交接本组关联的资产")
+        # 验证接收人是否属于本组
+        if to_user.group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能将资产交接给本组人员")
+    else:
+        # 普通用户只能交接自己的资产
+        if asset.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
 
     # 【干预点0：全局离职逃逸拦截 - 该用户如有任何未结案件，都不允许发起新的流转】
     check_any_unfinished_tasks_for_user(db, from_user_id)
@@ -203,13 +230,14 @@ async def create_transfer_request(
     
     logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}")
     
-    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务给转出人】
+    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务（优先使用资产的安全检查执行人ID，否则转出人）】
     try:
         from safety_check_linkage import create_system_allocated_task
+        assigned_id = getattr(asset, "safety_check_executor_id", None) or from_user_id
         create_system_allocated_task(
             db=db,
             asset_id=asset.id,
-            assigned_user_id=from_user_id,
+            assigned_user_id=assigned_id,
             source="transfer"
         )
     except Exception as e:

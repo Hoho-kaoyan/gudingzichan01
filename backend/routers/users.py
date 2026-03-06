@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import User
+from models import User, Asset, SafetyCheckTask, TaskAsset, SafetyCheckAutoConfig, SafetyCheckAssetTypeMapping
 from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse
 from auth import get_current_user, get_current_admin_user, get_password_hash
 import pandas as pd
 import io
+from datetime import datetime
 
 router = APIRouter()
 
@@ -27,15 +28,15 @@ async def get_current_user_info(
 @router.get("/", response_model=List[UserResponse])
 async def get_users(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 500,
     search: Optional[str] = Query(None, description="搜索关键词，支持模糊搜索所有字段"),
     role: Optional[str] = Query(None, description="按角色筛选"),
     status: Optional[str] = Query(None, description="按状态筛选"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取用户列表（所有已登录用户可访问，用于选择转入用户等场景），支持搜索"""
-    query = db.query(User)
+    """获取用户列表（所有已登录用户可访问，用于选择转入用户等场景），支持搜索；不含已逻辑删除用户"""
+    query = db.query(User).filter(User.deleted_at.is_(None))
     
     # 支持模糊搜索所有字段
     if search:
@@ -66,7 +67,7 @@ async def get_user(
     current_user: User = Depends(get_current_user)
 ):
     """获取指定用户信息"""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return UserResponse.model_validate(user)
@@ -79,8 +80,11 @@ async def create_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     """创建新用户（仅管理员）"""
-    # 检查EHR号是否已存在
-    existing_user = db.query(User).filter(User.ehr_number == user_data.ehr_number).first()
+    # 检查EHR号是否已存在（未删除用户）
+    existing_user = db.query(User).filter(
+        User.ehr_number == user_data.ehr_number,
+        User.deleted_at.is_(None)
+    ).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="EHR号已存在")
     
@@ -100,6 +104,84 @@ async def create_user(
     return UserResponse.model_validate(db_user)
 
 
+@router.put("/{user_id}/mark-resignation", response_model=UserResponse)
+async def mark_user_resignation(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """标记用户离职，并根据资产配置自动触发安全检查任务（仅管理员）"""
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    if user.status == "离职":
+        raise HTTPException(status_code=400, detail="该用户已经是离职状态")
+
+    print(f"DEBUG: 收到离职请求, 用户ID={user_id}")
+    # 1. 查找名下资产
+    assets = db.query(Asset).filter(Asset.user_id == user_id, Asset.deleted_at == None).all()
+    print(f"DEBUG: 用户 {user_id} 名下资产数量: {len(assets)}")
+    
+    if assets:
+        # 获取自动配置
+        auto_config = db.query(SafetyCheckAutoConfig).first()
+        print(f"DEBUG: 全局配置={auto_config.default_check_type_id if auto_config else '未配置'}")
+        default_type_id = auto_config.default_check_type_id if auto_config else None
+        
+        # 获取所有映射
+        mappings = {m.asset_type: m.check_type_id for m in db.query(SafetyCheckAssetTypeMapping).all()}
+        print(f"DEBUG: 映射数量={len(mappings)}")
+        
+        # 按类型对资产分类
+        tasks_to_create = {} # {type_id: [asset_ids]}
+        
+        for asset in assets:
+            # 优先匹配映射，否则使用全局默认
+            type_id = mappings.get(asset.name) or default_type_id
+            print(f"DEBUG: 资产 {asset.name} 匹配到的类型ID={type_id}")
+            if type_id:
+                if type_id not in tasks_to_create:
+                    tasks_to_create[type_id] = []
+                tasks_to_create[type_id].append(asset.id)
+        
+        print(f"DEBUG: 计划创建的任务数={len(tasks_to_create)}")
+        
+        # 创建安全检查任务
+        for type_id, asset_ids in tasks_to_create.items():
+            # 生成任务编号: SC-RESIGN-日期-用户ID-类型ID-随机数
+            import random
+            ts_str = datetime.now().strftime('%Y%m%d%H%M%S')
+            task_number = f"SC-RESIGN-{ts_str}-{user_id}-{type_id}-{random.randint(100, 999)}"
+            
+            task = SafetyCheckTask(
+                task_number=task_number,
+                check_type_id=type_id,
+                title=f"离职安全检查 - {user.real_name}",
+                description=f"用户 {user.real_name} 离职触发的自动安全检查任务",
+                status="pending",
+                source="resignation",
+                created_by_id=current_user.id
+            )
+            db.add(task)
+            db.flush() # 确保获取到 task.id
+            
+            for aid in asset_ids:
+                ta = TaskAsset(
+                    task_id=task.id,
+                    asset_id=aid,
+                    assigned_user_id=user_id,
+                    status="pending"
+                )
+                db.add(ta)
+    
+    # 2. 更新用户状态
+    user.status = "离职"
+    db.commit()
+    db.refresh(user)
+    return UserResponse.model_validate(user)
+
+
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: int,
@@ -108,7 +190,7 @@ async def update_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     """更新用户信息（仅管理员）"""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
@@ -160,18 +242,24 @@ async def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """删除用户（仅管理员）"""
+    """删除用户（仅管理员，软删除）"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="用户已被删除")
     
     # 禁止删除"仓库"用户（EHR号为1000000）
     if user.ehr_number == "1000000":
         raise HTTPException(status_code=400, detail="不能删除仓库用户")
     
-    db.delete(user)
+    from datetime import datetime, timezone
+    user.deleted_at = datetime.now(timezone.utc)
+    user.deleted_by_id = current_user.id
     db.commit()
     return {"message": "用户已删除"}
+
+
 
 
 @router.post("/import", response_model=ImportResponse)
@@ -247,27 +335,29 @@ async def import_users(
                     })
                     continue
                 
-                # 检查EHR号是否已存在
+                # 按EHR号查库（含已逻辑删除）：未删除则报已存在，已删除则恢复并更新
                 existing_user = db.query(User).filter(User.ehr_number == ehr_number).first()
-                if existing_user:
+                if existing_user and existing_user.deleted_at is None:
                     error_count += 1
                     error_msg = f"EHR号{ehr_number}已存在"
                     errors.append(f"第{row_number}行：{error_msg}")
-                    # 转换行数据为字典，处理NaN值
-                    row_data_dict = {}
-                    for k, v in row_data.items():
-                        if pd.isna(v) or v is None:
-                            row_data_dict[k] = ''
-                        else:
-                            row_data_dict[k] = str(v)
-                    error_details.append({
-                        "row_number": row_number,
-                        "error_message": error_msg,
-                        "row_data": row_data_dict
-                    })
+                    row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
+                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
                     continue
                 
-                # 创建用户
+                if existing_user and existing_user.deleted_at is not None:
+                    # 存在且已逻辑删除：恢复并用本行 Excel 更新
+                    existing_user.deleted_at = None
+                    existing_user.deleted_by_id = None
+                    existing_user.real_name = real_name
+                    existing_user.group = group
+                    existing_user.role = role
+                    existing_user.status = status
+                    existing_user.password_hash = get_password_hash(password)
+                    success_count += 1
+                    continue
+                
+                # 不存在：创建用户
                 hashed_password = get_password_hash(password)
                 db_user = User(
                     ehr_number=ehr_number,

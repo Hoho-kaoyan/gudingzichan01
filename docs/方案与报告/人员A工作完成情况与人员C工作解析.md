@@ -20,7 +20,7 @@
 - ✅ `safety_check_asset_type_mapping` - 实物名称→检查类型映射
   - 字段：id, asset_type, check_type_id, created_at
   - 位置：`backend/models.py` 第345-356行
-  - **注意**：文档中说的是按`category_id`（资产大类）映射，但实际实现是按`asset_type`（实物名称）映射
+  - **说明**：文档与实现均已按「实物名称」映射（`asset_type` / `asset.name`），与《文档一致性与联动安全检查实现方案》4.2.1 一致。
 
 - ✅ `pending_reallocations` - 待生效调拨
   - 字段：id, asset_id, new_user_id, task_id, created_at
@@ -60,10 +60,7 @@
 3. 校验检查类型存在且启用 (`is_active = True`)
 4. 无配置或无效时返回None并打日志
 
-**注意差异：**
-- 文档方案说的是按`category_id`（资产大类）解析
-- 实际实现是按`asset_name`（实物名称）解析
-- 这是一个实现差异，需要确认是否符合需求
+**说明**：文档与实现均已按「实物名称」解析（`asset_name` / `asset.name`），与《文档一致性与联动安全检查实现方案》4.2.1 一致。
 
 #### 4. 配置相关API ✅
 
@@ -85,10 +82,7 @@
 
 ### ⚠️ 需要注意的问题
 
-1. **映射方式差异**
-   - 文档方案：按`category_id`（资产大类）映射
-   - 实际实现：按`asset_name`（实物名称）映射
-   - **建议**：需要与产品确认哪种方式更符合业务需求
+1. **映射方式**：已确认按「实物名称」映射，文档与实现一致，无需再区分大类/实物名称。
 
 2. **Schema定义**
    - 需要检查`backend/schemas.py`中是否已定义对应的Schema类

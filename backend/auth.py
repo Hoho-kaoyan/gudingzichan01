@@ -55,8 +55,11 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
 
 
 def get_user_by_ehr(db: Session, ehr_number: str) -> Optional[User]:
-    """根据EHR号获取用户"""
-    return db.query(User).filter(User.ehr_number == ehr_number).first()
+    """根据EHR号获取用户（不含已逻辑删除用户）"""
+    return db.query(User).filter(
+        User.ehr_number == ehr_number,
+        User.deleted_at.is_(None)
+    ).first()
 
 
 def authenticate_user(db: Session, ehr_number: str, password: str) -> Optional[User]:

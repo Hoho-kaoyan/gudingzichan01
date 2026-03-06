@@ -2,7 +2,7 @@
 数据库模型定义
 包含用户、资产、审批流程等模型
 """
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean
+from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Boolean, Date
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
@@ -45,6 +45,8 @@ class User(Base):
     password_hash = Column(String(255), nullable=False, comment="密码哈希")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间（软删除）")
+    deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="删除人ID")
     
     # 关系
     assets = relationship("Asset", back_populates="user", foreign_keys="Asset.user_id")
@@ -87,6 +89,30 @@ class Asset(Base):
     user_group = Column(String(50), nullable=True, comment="使用人组别")
     remark = Column(Text, nullable=True, comment="备注说明（非必填）")
     
+    # 扩展字段（导入与详情用）
+    quantity = Column(Integer, default=1, nullable=True, comment="件数")
+    team = Column(String(100), nullable=True, comment="所在团队")
+    purchase_date = Column(Date, nullable=True, comment="购置日期")
+    card_number = Column(String(100), nullable=True, comment="卡片编号")
+    safety_check_executor_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="安全检查执行人ID，为空则用使用人")
+    safety_check_executor_name = Column(String(100), nullable=True, comment="安全检查执行人姓名")
+    computer_type = Column(String(100), nullable=True, comment="电脑类型")
+    computer_usage = Column(String(200), nullable=True, comment="电脑应用")
+    computer_name = Column(String(200), nullable=True, comment="计算机名")
+    monitor1_model = Column(String(200), nullable=True, comment="连接显示器1型号")
+    monitor1_asset_number = Column(String(100), nullable=True, comment="连接显示器1资产编号")
+    monitor1_serial = Column(String(100), nullable=True, comment="显示器1序列号")
+    monitor2_model = Column(String(200), nullable=True, comment="连接显示器2型号")
+    monitor2_asset_number = Column(String(100), nullable=True, comment="连接显示器2资产编号")
+    monitor2_serial = Column(String(100), nullable=True, comment="显示器2序列号")
+    asset_contact = Column(String(200), nullable=True, comment="资产管理联系人")
+    reserve_1 = Column(String(200), nullable=True, comment="预留1")
+    reserve_2 = Column(String(200), nullable=True, comment="预留2")
+    reserve_3 = Column(String(200), nullable=True, comment="预留3")
+    reserve_4 = Column(String(200), nullable=True, comment="预留4")
+    reserve_5 = Column(String(200), nullable=True, comment="预留5")
+    reserve_6 = Column(String(200), nullable=True, comment="预留6")
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间（软删除）")
@@ -96,6 +122,7 @@ class Asset(Base):
     category = relationship("AssetCategory", back_populates="assets")
     user = relationship("User", back_populates="assets", foreign_keys=[user_id])
     deleted_by = relationship("User", foreign_keys=[deleted_by_id])
+    safety_check_executor = relationship("User", foreign_keys=[safety_check_executor_id])
 
 
 class TransferRequest(Base):

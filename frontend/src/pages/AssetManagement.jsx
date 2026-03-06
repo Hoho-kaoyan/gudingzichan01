@@ -112,17 +112,32 @@ const AssetManagement = () => {
     if (!isAdminOrLeader && currentUser) {
       form.setFieldsValue({ user_id: currentUser.id })
     }
+    fetchUsers()
+    fetchCategories()
     setModalVisible(true)
   }
 
   const handleEdit = (record) => {
-    // 普通用户只能编辑自己名下的资产
-    if (!isAdmin && record.user?.id !== currentUser?.id) {
-      message.error('只能编辑自己名下的资产')
-      return
+    // 权限校验：
+    // 1. 管理员：全量编辑
+    // 2. 组长：只能编辑本组资产
+    // 3. 普通用户：只能编辑自己名下的资产
+    if (isAdmin) {
+      // 通过
+    } else if (isLeader) {
+      if (record.user_group !== currentUser?.group) {
+        message.error('组长只能编辑本组关联的资产')
+        return
+      }
+    } else {
+      if (record.user?.id !== currentUser?.id) {
+        message.error('只能编辑自己名下的资产')
+        return
+      }
     }
-    // 检查是否有待审批的编辑申请
-    if (!isAdmin) {
+
+    // 检查是否有待审批的编辑申请（仅普通用户）
+    if (!isAdminOrLeader) {
       const request = getAssetEditRequest(record.id)
       if (request && request.status === 'pending') {
         message.warning('该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请')
@@ -135,6 +150,8 @@ const AssetManagement = () => {
       category_id: record.category?.id,
       user_id: record.user?.id
     })
+    fetchUsers()
+    fetchCategories()
     setModalVisible(true)
   }
 
@@ -230,7 +247,7 @@ const AssetManagement = () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
       const { success_count, error_count, errors, error_details } = response.data
-      
+
       if (error_count > 0) {
         // 如果有错误，显示错误详情模态框
         setImportErrors(error_details || errors.map((err, idx) => ({
@@ -244,6 +261,7 @@ const AssetManagement = () => {
         message.success(`导入完成：成功 ${success_count} 条`)
       }
       fetchAssets()
+      fetchCategories()
     } catch (error) {
       message.error(error.response?.data?.detail || '导入失败')
     }
@@ -334,58 +352,58 @@ const AssetManagement = () => {
   // 定义列配置
   const getBaseColumns = () => {
     const baseColumns = [
-    {
-      title: '资产编号',
-      dataIndex: 'asset_number',
-      key: 'asset_number',
-      width: 90
-    },
-    {
-      title: '所属大类',
-      dataIndex: ['category', 'name'],
-      key: 'category',
-      width: 80
-    },
-    {
-      title: '实物名称',
-      dataIndex: 'name',
-      key: 'name',
-      width: 110,
-      ellipsis: true
-    },
-    {
-      title: '规格型号',
-      dataIndex: 'specification',
-      key: 'specification',
-      width: 90,
-      ellipsis: true
-    },
-    {
-      title: '状态',
-      dataIndex: 'status',
-      key: 'status',
-      width: 80,
-      render: (status) => {
-        const isInStock = status === '库存备用' || status === '在库'
-        return (
-          <Tag color={isInStock ? 'default' : 'green'}>
-            {isInStock ? '在库' : (status || '-')}
-          </Tag>
-        )
+      {
+        title: '资产编号',
+        dataIndex: 'asset_number',
+        key: 'asset_number',
+        width: 90
+      },
+      {
+        title: '所属大类',
+        dataIndex: ['category', 'name'],
+        key: 'category',
+        width: 80
+      },
+      {
+        title: '实物名称',
+        dataIndex: 'name',
+        key: 'name',
+        width: 110,
+        ellipsis: true
+      },
+      {
+        title: '规格型号',
+        dataIndex: 'specification',
+        key: 'specification',
+        width: 90,
+        ellipsis: true
+      },
+      {
+        title: '状态',
+        dataIndex: 'status',
+        key: 'status',
+        width: 80,
+        render: (status) => {
+          const isInStock = status === '库存备用' || status === '在库'
+          return (
+            <Tag color={isInStock ? 'default' : 'green'}>
+              {isInStock ? '在库' : (status || '-')}
+            </Tag>
+          )
+        }
+      },
+      {
+        title: '使用人',
+        dataIndex: ['user', 'real_name'],
+        key: 'user',
+        width: 80
+      },
+      {
+        title: '组别',
+        dataIndex: 'user_group',
+        key: 'user_group',
+        width: 80
       }
-    },
-    {
-      title: '使用人',
-      dataIndex: ['user', 'real_name'],
-      key: 'user',
-      width: 80
-    },
-    {
-      title: '组别',
-      dataIndex: 'user_group',
-      key: 'user_group',
-      width: 80
-    }
     ]
 
     // 普通用户添加编辑申请状态列
@@ -451,36 +469,46 @@ const AssetManagement = () => {
       fixed: 'right',
       resizable: false, // 操作列不需要调整宽度
       render: (_, record) => {
-        // 管理员和组长可以编辑资产，普通用户只能编辑自己名下的资产
-        // 注意：组长权限控制需要等待后端实现权限校验（任务12）
-        const canEdit = isAdminOrLeader || record.user?.id === currentUser?.id
+        // 权限判断：
+        // 1. 管理员：全量
+        // 2. 组长：本组
+        // 3. 普通用户：名下
+        let canEdit = false
+        if (isAdmin) {
+          canEdit = true
+        } else if (isLeader) {
+          canEdit = record.user_group === currentUser?.group
+        } else {
+          canEdit = record.user?.id === currentUser?.id
+        }
+
         const canDelete = isAdmin
         // 检查是否有待审批的编辑申请（仅普通用户）
         const hasPendingRequest = !isAdminOrLeader && getAssetEditRequest(record.id)?.status === 'pending'
-        
+
         return (
           <Space size="small">
-            <Button 
-              type="link" 
-              icon={<EyeOutlined />} 
+            <Button
+              type="link"
+              icon={<EyeOutlined />}
               onClick={() => handleViewAssetDetail(record)}
               size="small"
               style={{ padding: 0, color: '#ff9800' }}
               title="查看详情"
             />
-            <Button 
-              type="link" 
-              icon={<HistoryOutlined />} 
+            <Button
+              type="link"
+              icon={<HistoryOutlined />}
               onClick={() => navigate(`/assets/${record.id}/history`)}
               size="small"
               style={{ padding: 0, color: '#ff9800' }}
               title="流转记录"
             />
             {canEdit && (
-              <Button 
-                type="link" 
-                icon={<EditOutlined />} 
-                onClick={() => handleEdit(record)} 
+              <Button
+                type="link"
+                icon={<EditOutlined />}
+                onClick={() => handleEdit(record)}
                 disabled={hasPendingRequest}
                 title={hasPendingRequest ? '该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请' : '编辑'}
                 size="small"
@@ -492,10 +520,10 @@ const AssetManagement = () => {
                 title="确定要删除吗？"
                 onConfirm={() => handleDelete(record.id)}
               >
-                <Button 
-                  type="link" 
-                  danger 
-                  icon={<DeleteOutlined />} 
+                <Button
+                  type="link"
+                  danger
+                  icon={<DeleteOutlined />}
                   size="small"
                   style={{ padding: 0 }}
                   title="删除"
@@ -706,32 +734,29 @@ const AssetManagement = () => {
             label="使用人"
             name="user_id"
           >
-            <Select 
-              allowClear 
+            <Select
+              allowClear
               disabled={!isAdminOrLeader}
-              // 组长编辑资产时，使用人选择框只显示本组用户
-              // 注意：此功能需要等待后端实现组长权限校验（任务12）后确认是否需要调整
+              placeholder={isLeader ? "请选择本组人员" : "请选择使用人"}
+              // 前端搜索过滤
+              showSearch
               filterOption={(input, option) => {
-                if (isLeader && currentUser?.group) {
-                  // 组长只能看到本组用户
-                  const user = users.find(u => u.id === option.value)
-                  return user?.group === currentUser.group
-                }
-                return true
+                const user = users.find(u => u.id === option.value)
+                const searchStr = `${user?.real_name}${user?.ehr_number}`.toLowerCase()
+                return searchStr.includes(input.toLowerCase())
               }}
             >
               {users
                 .filter(user => {
-                  // 组长编辑资产时，只显示本组用户
-                  // 注意：此过滤逻辑需要等待后端实现组长权限校验（任务12）后确认是否需要调整
-                  if (isLeader && currentUser?.group) {
-                    return user.group === currentUser.group
+                  // 组长只能给本组分配；管理员可以给所有人分配
+                  if (isLeader) {
+                    return user.group === currentUser?.group
                   }
                   return true
                 })
                 .map(user => (
                   <Select.Option key={user.id} value={user.id}>
-                    {user.real_name} ({user.ehr_number})
+                    {user.real_name} ({user.ehr_number}) - {user.group}
                   </Select.Option>
                 ))}
             </Select>
@@ -886,7 +911,7 @@ const AssetManagement = () => {
                       user_group: '使用人组别',
                       remark: '备注说明'
                     }
-                    
+
                     // 处理特殊字段的显示值
                     let displayValue = value
                     if (key === 'category_id' && value) {
@@ -902,7 +927,7 @@ const AssetManagement = () => {
                     } else {
                       displayValue = String(value)
                     }
-                    
+
                     return (
                       <Descriptions.Item key={key} label={fieldNames[key] || key} span={key === 'remark' ? 2 : 1}>
                         {displayValue || '-'}

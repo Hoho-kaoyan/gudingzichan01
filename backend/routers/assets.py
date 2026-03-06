@@ -167,8 +167,10 @@ async def get_asset(
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
     
-    # 普通用户只能查看自己名下的资产
-    if current_user.role != "admin" and asset.user_id != current_user.id:
+    # 普通用户只能查看自己名下的资产；组长可查看本组资产
+    if current_user.role == "user" and asset.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="无权查看此资产")
+    if current_user.role == "leader" and asset.user_group != current_user.group:
         raise HTTPException(status_code=403, detail="无权查看此资产")
     
     return AssetResponse.model_validate(asset)
@@ -257,13 +259,14 @@ async def create_asset(
     db.commit()
     db.refresh(db_asset)
     
-    # 【新增逻辑】：如果资产落库后有明确的使用人（无论管理员指定还是普通用户自带），下发安检联动任务
-    if db_asset.user_id:
+    # 【新增逻辑】：如果资产落库后有使用人或安全检查执行人，下发安检联动任务（优先使用安全检查执行人ID）
+    assigned_id = getattr(db_asset, "safety_check_executor_id", None) or db_asset.user_id
+    if assigned_id:
         try:
             create_system_allocated_task(
                 db=db,
                 asset_id=db_asset.id,
-                assigned_user_id=db_asset.user_id,
+                assigned_user_id=assigned_id,
                 source="inbound"
             )
         except Exception as e:
@@ -436,20 +439,22 @@ async def update_asset(
         from models import PendingReallocation
         # 如果原来有使用人，派发给旧人查（转出核验）；如果没人在库房（如新资产），派发给新人（入职上岗核验）
         allocated_user_id = old_user_id if old_user_id else new_user_id
-        if allocated_user_id:
+        assigned_id = getattr(asset, "safety_check_executor_id", None) or allocated_user_id
+        if assigned_id:
             try:
                 task = create_system_allocated_task(
                     db=db,
                     asset_id=asset.id,
-                    assigned_user_id=allocated_user_id,
+                    assigned_user_id=assigned_id,
                     source="reallocation"
                 )
-                pending = PendingReallocation(
-                    asset_id=asset.id,
-                    new_user_id=new_user_id,
-                    task_id=task.id
-                )
-                db.add(pending)
+                if task:
+                    pending = PendingReallocation(
+                        asset_id=asset.id,
+                        new_user_id=new_user_id,
+                        task_id=task.id
+                    )
+                    db.add(pending)
                 logger.info(f"生成待生效调拨记录：资产 {asset.asset_number} 拟移交至新用户ID {new_user_id}")
             except Exception as e:
                 logger.error(f"调拨时触发系统安检任务下发失败: {e}", exc_info=True)
@@ -587,6 +592,38 @@ async def import_assets(
                     detail=f"Excel文件缺少必需的列：{col}"
                 )
         
+        def _row_str(row, df_cols, *col_names, default=""):
+            """从行中取第一个存在的列的值，strip 后返回，空或 NaN 返回 default。"""
+            for c in col_names:
+                if c in df_cols:
+                    v = row.get(c, default)
+                    if v is None or (hasattr(v, "__iter__") and not isinstance(v, str) and pd.isna(v)):
+                        return default
+                    s = str(v).strip()
+                    return s if s else default
+            return default
+        
+        def _row_date(row, df_cols, col_name):
+            """解析购置日期列为 date 或 None。"""
+            if col_name not in df_cols:
+                return None
+            v = row.get(col_name)
+            if v is None or pd.isna(v):
+                return None
+            if hasattr(v, "date"):
+                return v.date()
+            s = str(v).strip()[:10]
+            if not s:
+                return None
+            try:
+                from datetime import datetime as _dt
+                return _dt.strptime(s, "%Y-%m-%d").date()
+            except Exception:
+                try:
+                    return pd.to_datetime(s).date()
+                except Exception:
+                    return None
+        
         success_count = 0
         error_count = 0
         skip_count = 0
@@ -602,20 +639,16 @@ async def import_assets(
                 category_name = str(row['所属大类']).strip()
                 name = str(row['实物名称']).strip()
                 
-                # 检查资产编号是否已存在（只检查未删除的）
-                existing = db.query(Asset).filter(
-                    Asset.asset_number == asset_number,
-                    Asset.deleted_at.is_(None)
-                ).first()
-                if existing:
-                    # 改动：碰到数据库已有本编号的记录，当作正常数据静默跳过，而不是算作导入异常
+                # 按资产编号查库（含已逻辑删除），用于判断：未删除则跳过，已删除则恢复+更新
+                existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
+                if existing_any and existing_any.deleted_at is None:
+                    # 已存在且未删除：静默跳过
                     skip_count += 1
                     continue
                 
                 # 查找或创建资产大类
                 category = db.query(AssetCategory).filter(AssetCategory.name == category_name).first()
                 if not category:
-                    # 自动创建大类
                     category = AssetCategory(name=category_name)
                     db.add(category)
                     db.flush()
@@ -638,67 +671,199 @@ async def import_assets(
                 status = get_val('状态') or '在用'
                 if status == '库存备用':
                     status = '在库'
-                mac_address = get_val('MAC地址')
-                ip_address = get_val('IP地址')
-                office_location = get_val('存放办公地点')
-                floor = get_val('存放楼层')
-                seat_number = get_val('座位号')
+                mac_address = _row_str(row, df.columns, '终端mac地址', 'MAC地址') or None
+                ip_address = _row_str(row, df.columns, '终端IP号', 'IP地址') or None
+                office_location = _row_str(row, df.columns, '存放办公地点') or None
+                floor = _row_str(row, df.columns, '具体存放楼层', '存放楼层') or None
+                seat_number = _row_str(row, df.columns, '座位号') or None
+                user_group = _row_str(row, df.columns, '使用人组别', '组別', '组别') or None
+                remark = _row_str(row, df.columns, '备注说明') or None
+                # 扩展字段
+                quantity_val = _row_str(row, df.columns, '件数')
+                quantity = int(quantity_val) if quantity_val.isdigit() else (1 if not quantity_val else None)
+                if quantity is not None and quantity < 1:
+                    quantity = 1
+                team = _row_str(row, df.columns, '所在团队') or None
+                purchase_date = _row_date(row, df.columns, '购置日期')
+                card_number = _row_str(row, df.columns, '卡片编号') or None
+                computer_type = _row_str(row, df.columns, '电脑类型') or None
+                computer_usage = _row_str(row, df.columns, '电脑应用') or None
+                computer_name = _row_str(row, df.columns, '计算机名') or None
+                monitor1_model = _row_str(row, df.columns, '连接显示器1型号') or None
+                monitor1_asset_number = _row_str(row, df.columns, '连接显示器1资产编号') or None
+                monitor1_serial = _row_str(row, df.columns, '显示器1 序列号', '显示器1序列号') or None
+                monitor2_model = _row_str(row, df.columns, '连接显示器2', '连接显示器2型号') or None
+                monitor2_asset_number = _row_str(row, df.columns, '连接显示器2资产编号') or None
+                monitor2_serial = _row_str(row, df.columns, '显示器2序列号') or None
+                asset_contact = _row_str(row, df.columns, '资产管理联系人') or None
+                reserve_1 = _row_str(row, df.columns, '预留1') or None
+                reserve_2 = _row_str(row, df.columns, '预留2') or None
+                reserve_3 = _row_str(row, df.columns, '预留3') or None
+                reserve_4 = _row_str(row, df.columns, '预留4') or None
+                reserve_5 = _row_str(row, df.columns, '预留5') or None
+                reserve_6 = _row_str(row, df.columns, '预留6') or None
+                # 安全检查执行人：支持「安全检查执行人」填姓名、「安全检查执行人ID」填ID；姓名会落库并解析为ID用于派单
+                safety_check_executor_id = None
+                safety_check_executor_name = _row_str(row, df.columns, '安全检查执行人') or None
+                if '安全检查执行人ID' in df.columns:
+                    seid_val = _row_str(row, df.columns, '安全检查执行人ID')
+                    if seid_val and seid_val.isdigit():
+                        safety_check_executor_id = int(seid_val)
+                if safety_check_executor_id is None and safety_check_executor_name:
+                    u = db.query(User).filter(
+                        User.real_name == safety_check_executor_name.strip(),
+                        User.deleted_at.is_(None)
+                    ).first()
+                    if u:
+                        safety_check_executor_id = u.id
                 
-                # 处理使用人EHR号：处理 NaN 和空值
-                user_ehr = get_val('使用人EHR号')
-                if user_ehr and user_ehr.endswith('.0'):
-                    user_ehr = user_ehr[:-2]
-                    
-                # 支持两种列名：使用人组别 或 组别
-                user_group = get_val('使用人组别') or get_val('组别')
-                remark = get_val('备注说明')
-                
-                # 如果提供了使用人EHR号，查找用户
+                # 解析使用人（所有人）：优先所有人ID，否则所有人（姓名），否则使用人EHR号
                 user_id = None
-                if user_ehr:
-                    user = db.query(User).filter(User.ehr_number == user_ehr).first()
-                    if user:
-                        user_id = user.id
-                        if not user_group:
-                            user_group = user.group
+                if '所有人ID' in df.columns:
+                    uid_val = _row_str(row, df.columns, '所有人ID')
+                    if uid_val and uid_val.replace('.', '').isdigit():
+                        try:
+                            user_id = int(float(uid_val))
+                            u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+                            if not u:
+                                user_id = None
+                            elif not user_group:
+                                user_group = u.group
+                        except (ValueError, TypeError):
+                            user_id = None
+                if user_id is None:
+                    owner_name = _row_str(row, df.columns, '所有人')
+                    if owner_name:
+                        u = db.query(User).filter(
+                            User.real_name == owner_name.strip(),
+                            User.deleted_at.is_(None)
+                        ).first()
+                        if u:
+                            user_id = u.id
+                            if not user_group:
+                                user_group = u.group
+                        else:
+                            error_count += 1
+                            error_msg = f"所有人「{owner_name}」未找到对应用户"
+                            errors.append(f"第{row_number}行：{error_msg}")
+                            row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
+                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
+                            continue
+                if user_id is None:
+                    raw_user_ehr = _row_str(row, df.columns, '使用人EHR号') or ""
+                    raw_user_ehr = str(raw_user_ehr).strip()
+                    if raw_user_ehr.endswith('.0'):
+                        user_ehr = raw_user_ehr[:-2]
                     else:
-                        # EHR号存在但不匹配系统用户，按用户要求：状态设为“在库”
-                        status = '在库'
-                else:
-                    # EHR号不存在或为nan，按用户要求：状态设为“在库”
-                    status = '在库'
+                        user_ehr = raw_user_ehr
+                    if user_ehr:
+                        user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
+                        if user:
+                            user_id = user.id
+                            if not user_group:
+                                user_group = user.group
+                        else:
+                            error_count += 1
+                            error_msg = f"使用人EHR号{user_ehr}不存在"
+                            errors.append(f"第{row_number}行：{error_msg}")
+                            row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
+                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
+                            continue
                 
-                # 创建资产
+                assigned_id = safety_check_executor_id or user_id
+                
+                if existing_any and existing_any.deleted_at is not None:
+                    # 存在且已逻辑删除：恢复并更新该行，不插入
+                    existing_any.deleted_at = None
+                    existing_any.deleted_by_id = None
+                    existing_any.category_id = category.id
+                    existing_any.name = name
+                    existing_any.specification = specification or None
+                    existing_any.status = status
+                    existing_any.mac_address = mac_address or None
+                    existing_any.ip_address = ip_address or None
+                    existing_any.office_location = office_location or None
+                    existing_any.floor = floor or None
+                    existing_any.seat_number = seat_number or None
+                    existing_any.user_id = user_id
+                    existing_any.user_group = user_group or None
+                    existing_any.remark = remark or None
+                    existing_any.quantity = quantity
+                    existing_any.team = team
+                    existing_any.purchase_date = purchase_date
+                    existing_any.card_number = card_number
+                    existing_any.safety_check_executor_id = safety_check_executor_id
+                    existing_any.safety_check_executor_name = safety_check_executor_name
+                    existing_any.computer_type = computer_type
+                    existing_any.computer_usage = computer_usage
+                    existing_any.computer_name = computer_name
+                    existing_any.monitor1_model = monitor1_model
+                    existing_any.monitor1_asset_number = monitor1_asset_number
+                    existing_any.monitor1_serial = monitor1_serial
+                    existing_any.monitor2_model = monitor2_model
+                    existing_any.monitor2_asset_number = monitor2_asset_number
+                    existing_any.monitor2_serial = monitor2_serial
+                    existing_any.asset_contact = asset_contact
+                    existing_any.reserve_1 = reserve_1
+                    existing_any.reserve_2 = reserve_2
+                    existing_any.reserve_3 = reserve_3
+                    existing_any.reserve_4 = reserve_4
+                    existing_any.reserve_5 = reserve_5
+                    existing_any.reserve_6 = reserve_6
+                    db.flush()
+                    if assigned_id:
+                        try:
+                            create_system_allocated_task(db=db, asset_id=existing_any.id, assigned_user_id=assigned_id, source="inbound")
+                        except Exception as e:
+                            logger.error(f"批量导入恢复资产时触发系统安检任务下发失败: {e}", exc_info=True)
+                    success_count += 1
+                    continue
+                
+                # 不存在：新增
                 db_asset = Asset(
                     asset_number=asset_number,
                     category_id=category.id,
                     name=name,
-                    specification=specification,
+                    specification=specification or None,
                     status=status,
-                    mac_address=mac_address,
-                    ip_address=ip_address,
-                    office_location=office_location,
-                    floor=floor,
-                    seat_number=seat_number,
+                    mac_address=mac_address or None,
+                    ip_address=ip_address or None,
+                    office_location=office_location or None,
+                    floor=floor or None,
+                    seat_number=seat_number or None,
                     user_id=user_id,
-                    user_group=user_group,
-                    remark=remark
+                    user_group=user_group or None,
+                    remark=remark or None,
+                    quantity=quantity,
+                    team=team,
+                    purchase_date=purchase_date,
+                    card_number=card_number,
+                    safety_check_executor_id=safety_check_executor_id,
+                    safety_check_executor_name=safety_check_executor_name,
+                    computer_type=computer_type,
+                    computer_usage=computer_usage,
+                    computer_name=computer_name,
+                    monitor1_model=monitor1_model,
+                    monitor1_asset_number=monitor1_asset_number,
+                    monitor1_serial=monitor1_serial,
+                    monitor2_model=monitor2_model,
+                    monitor2_asset_number=monitor2_asset_number,
+                    monitor2_serial=monitor2_serial,
+                    asset_contact=asset_contact,
+                    reserve_1=reserve_1,
+                    reserve_2=reserve_2,
+                    reserve_3=reserve_3,
+                    reserve_4=reserve_4,
+                    reserve_5=reserve_5,
+                    reserve_6=reserve_6,
                 )
                 db.add(db_asset)
-                db.flush() 
-                
-                # 【新增逻辑】：批量入库场景下，若指定了使用人，进行联动安检派单
-                if db_asset.user_id:
+                db.flush()
+                if assigned_id:
                     try:
-                        create_system_allocated_task(
-                            db=db,
-                            asset_id=db_asset.id,
-                            assigned_user_id=db_asset.user_id,
-                            source="inbound"
-                        )
+                        create_system_allocated_task(db=db, asset_id=db_asset.id, assigned_user_id=assigned_id, source="inbound")
                     except Exception as e:
                         logger.error(f"批量导入时触发系统安检任务下发失败: {e}", exc_info=True)
-                
                 success_count += 1
                 
             except Exception as e:

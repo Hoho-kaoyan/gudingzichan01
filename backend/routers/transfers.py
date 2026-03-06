@@ -87,8 +87,9 @@ async def get_transfer_requests(
         ).all()
         asset_ids = [row[0] for row in asset_results]
         
-        # 获取匹配的用户ID
+        # 获取匹配的用户ID（不含已逻辑删除用户）
         user_results = db.query(User.id).filter(
+            User.deleted_at.is_(None),
             or_(
                 User.real_name.contains(search),
                 User.ehr_number.contains(search),
@@ -210,13 +211,14 @@ async def create_transfer_request(
     
     logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}")
     
-    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务给转出人】
+    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务（优先使用资产的安全检查执行人ID，否则转出人）】
     try:
         from safety_check_linkage import create_system_allocated_task
+        assigned_id = getattr(asset, "safety_check_executor_id", None) or from_user_id
         create_system_allocated_task(
             db=db,
             asset_id=asset.id,
-            assigned_user_id=from_user_id,
+            assigned_user_id=assigned_id,
             source="transfer"
         )
     except Exception as e:

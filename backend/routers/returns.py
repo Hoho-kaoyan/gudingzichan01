@@ -57,8 +57,9 @@ async def get_return_requests(
         ).all()
         asset_ids = [row[0] for row in asset_results]
         
-        # 获取匹配的用户ID
+        # 获取匹配的用户ID（不含已逻辑删除用户）
         user_results = db.query(User.id).filter(
+            User.deleted_at.is_(None),
             or_(
                 User.real_name.contains(search),
                 User.ehr_number.contains(search),

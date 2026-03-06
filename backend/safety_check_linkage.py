@@ -10,23 +10,23 @@ from logger import logger
 
 def get_check_type_for_asset(db: Session, asset) -> Optional[int]:
     """
-    根据资产的大类名称解析应使用的检查类型 ID。
-    先查「资产大类名称→检查类型」映射，若无则用全局默认检查类型。
+    根据资产的实物名称解析应使用的检查类型 ID。
+    先查「实物名称→检查类型」映射，若无则用全局默认检查类型。
     若解析出的检查类型不存在或已停用，返回 None。
 
     :param db: 数据库会话
     :param asset: Asset 对象
     :return: 检查类型 id，无配置或无效时返回 None
     """
-    if not asset or not asset.category:
-        logger.warning("联动安全检查：未找到有效的资产大类信息，不创建任务")
+    if not asset or not (getattr(asset, "name", None) or "").strip():
+        logger.warning("联动安全检查：未找到有效的资产实物名称，不创建任务")
         return None
 
-    category_name = asset.category.name.strip()
+    asset_name = asset.name.strip()
 
-    # 1) 查资产大类名称→检查类型映射
+    # 1) 查实物名称→检查类型映射
     mapping = db.query(SafetyCheckAssetTypeMapping).filter(
-        SafetyCheckAssetTypeMapping.asset_type == category_name
+        SafetyCheckAssetTypeMapping.asset_type == asset_name
     ).first()
     
     if mapping:
@@ -35,7 +35,7 @@ def get_check_type_for_asset(db: Session, asset) -> Optional[int]:
         # 2) 用全局默认检查类型
         config = db.query(SafetyCheckAutoConfig).first()
         if not config or config.default_check_type_id is None:
-            logger.warning("联动安全检查：未配置默认检查类型且资产大类 %s 无映射记录，不创建任务", category_name)
+            logger.warning("联动安全检查：未配置默认检查类型且实物名称 %s 无映射记录，不创建任务", asset_name)
             return None
         check_type_id = config.default_check_type_id
 
@@ -64,8 +64,7 @@ def create_system_allocated_task(db: Session, asset_id: int, assigned_user_id: i
         logger.warning(f"未能找到 ID 为 {asset_id} 的有效资产对象，无法分发联动任务。")
         return None
 
-    # 2) 使用资产大类找配置好的检查类型
-    # 注意此时的 asset 需要有关联的 category 对象
+    # 2) 使用实物名称找配置好的检查类型
     check_type_id = get_check_type_for_asset(db, asset)
     if not check_type_id:
         # 当解析不出的时候（或类型被停用时候），日志已在内层被打印，静默不创建。

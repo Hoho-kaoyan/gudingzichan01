@@ -191,6 +191,8 @@ const SafetyCheckTaskManagement = () => {
     setAssetFilters({})
     setModalVisible(true)
     fetchAssets()
+    fetchCheckTypes()
+    fetchCategories()
   }
 
   const handleNext = async () => {

@@ -112,6 +112,8 @@ const AssetManagement = () => {
     if (!isAdminOrLeader && currentUser) {
       form.setFieldsValue({ user_id: currentUser.id })
     }
+    fetchUsers()
+    fetchCategories()
     setModalVisible(true)
   }
 
@@ -148,6 +150,8 @@ const AssetManagement = () => {
       category_id: record.category?.id,
       user_id: record.user?.id
     })
+    fetchUsers()
+    fetchCategories()
     setModalVisible(true)
   }
 
@@ -257,6 +261,7 @@ const AssetManagement = () => {
         message.success(`导入完成：成功 ${success_count} 条`)
       }
       fetchAssets()
+      fetchCategories()
     } catch (error) {
       message.error(error.response?.data?.detail || '导入失败')
     }

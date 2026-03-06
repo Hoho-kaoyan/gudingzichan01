@@ -35,8 +35,8 @@ async def get_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取用户列表（所有已登录用户可访问，用于选择转入用户等场景），支持搜索"""
-    query = db.query(User)
+    """获取用户列表（所有已登录用户可访问，用于选择转入用户等场景），支持搜索；不含已逻辑删除用户"""
+    query = db.query(User).filter(User.deleted_at.is_(None))
     
     # 支持模糊搜索所有字段
     if search:
@@ -67,7 +67,7 @@ async def get_user(
     current_user: User = Depends(get_current_user)
 ):
     """获取指定用户信息"""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     return UserResponse.model_validate(user)
@@ -80,8 +80,11 @@ async def create_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     """创建新用户（仅管理员）"""
-    # 检查EHR号是否已存在
-    existing_user = db.query(User).filter(User.ehr_number == user_data.ehr_number).first()
+    # 检查EHR号是否已存在（未删除用户）
+    existing_user = db.query(User).filter(
+        User.ehr_number == user_data.ehr_number,
+        User.deleted_at.is_(None)
+    ).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="EHR号已存在")
     
@@ -108,7 +111,7 @@ async def mark_user_resignation(
     current_user: User = Depends(get_current_admin_user)
 ):
     """标记用户离职，并根据资产配置自动触发安全检查任务（仅管理员）"""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
@@ -187,7 +190,7 @@ async def update_user(
     current_user: User = Depends(get_current_admin_user)
 ):
     """更新用户信息（仅管理员）"""
-    user = db.query(User).filter(User.id == user_id).first()
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
     
@@ -214,16 +217,20 @@ async def delete_user(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """删除用户（仅管理员）"""
+    """删除用户（仅管理员，软删除）"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if user.deleted_at is not None:
+        raise HTTPException(status_code=400, detail="用户已被删除")
     
     # 禁止删除"仓库"用户（EHR号为1000000）
     if user.ehr_number == "1000000":
         raise HTTPException(status_code=400, detail="不能删除仓库用户")
     
-    db.delete(user)
+    from datetime import datetime, timezone
+    user.deleted_at = datetime.now(timezone.utc)
+    user.deleted_by_id = current_user.id
     db.commit()
     return {"message": "用户已删除"}
 
@@ -297,27 +304,29 @@ async def import_users(
                     })
                     continue
                 
-                # 检查EHR号是否已存在
+                # 按EHR号查库（含已逻辑删除）：未删除则报已存在，已删除则恢复并更新
                 existing_user = db.query(User).filter(User.ehr_number == ehr_number).first()
-                if existing_user:
+                if existing_user and existing_user.deleted_at is None:
                     error_count += 1
                     error_msg = f"EHR号{ehr_number}已存在"
                     errors.append(f"第{row_number}行：{error_msg}")
-                    # 转换行数据为字典，处理NaN值
-                    row_data_dict = {}
-                    for k, v in row_data.items():
-                        if pd.isna(v) or v is None:
-                            row_data_dict[k] = ''
-                        else:
-                            row_data_dict[k] = str(v)
-                    error_details.append({
-                        "row_number": row_number,
-                        "error_message": error_msg,
-                        "row_data": row_data_dict
-                    })
+                    row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
+                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
                     continue
                 
-                # 创建用户
+                if existing_user and existing_user.deleted_at is not None:
+                    # 存在且已逻辑删除：恢复并用本行 Excel 更新
+                    existing_user.deleted_at = None
+                    existing_user.deleted_by_id = None
+                    existing_user.real_name = real_name
+                    existing_user.group = group
+                    existing_user.role = role
+                    existing_user.status = status
+                    existing_user.password_hash = get_password_hash(password)
+                    success_count += 1
+                    continue
+                
+                # 不存在：创建用户
                 hashed_password = get_password_hash(password)
                 db_user = User(
                     ehr_number=ehr_number,

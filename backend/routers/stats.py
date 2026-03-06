@@ -18,14 +18,17 @@ async def get_stats(
     current_user = Depends(get_current_user)
 ):
     """获取系统统计数据"""
-    # 用户总数
-    total_users = db.query(func.count(User.id)).scalar()
+    # 用户总数（不含已逻辑删除）
+    total_users = db.query(func.count(User.id)).filter(User.deleted_at.is_(None)).scalar()
     
-    # 资产总数
-    total_assets = db.query(func.count(Asset.id)).scalar()
+    # 资产总数（不含已逻辑删除）
+    total_assets = db.query(func.count(Asset.id)).filter(Asset.deleted_at.is_(None)).scalar()
     
-    # 在用资产数
-    in_use_assets = db.query(func.count(Asset.id)).filter(Asset.status == "在用").scalar()
+    # 在用资产数（不含已逻辑删除）
+    in_use_assets = db.query(func.count(Asset.id)).filter(
+        Asset.deleted_at.is_(None),
+        Asset.status == "在用"
+    ).scalar()
     
     # 待审批的交接申请数
     pending_transfers = db.query(func.count(TransferRequest.id)).filter(

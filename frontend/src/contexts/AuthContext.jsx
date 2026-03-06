@@ -55,10 +55,11 @@ export const AuthProvider = ({ children }) => {
       message.success('登录成功')
       return true
     } catch (error) {
-      message.error(error.response?.data?.detail || '登录失败')
-      return false
+      // 不再在此处直接弹窗，交由调用者处理更复杂的 UI 逻辑
+      throw error
     }
   }
+
 
   const logout = () => {
     localStorage.removeItem('token')

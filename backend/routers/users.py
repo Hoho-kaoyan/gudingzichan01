@@ -7,11 +7,12 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import User
+from models import User, Asset, SafetyCheckTask, TaskAsset, SafetyCheckAutoConfig, SafetyCheckAssetTypeMapping
 from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse
 from auth import get_current_user, get_current_admin_user, get_password_hash
 import pandas as pd
 import io
+from datetime import datetime
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ async def get_current_user_info(
 @router.get("/", response_model=List[UserResponse])
 async def get_users(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = 500,
     search: Optional[str] = Query(None, description="搜索关键词，支持模糊搜索所有字段"),
     role: Optional[str] = Query(None, description="按角色筛选"),
     status: Optional[str] = Query(None, description="按状态筛选"),
@@ -100,6 +101,84 @@ async def create_user(
     return UserResponse.model_validate(db_user)
 
 
+@router.put("/{user_id}/mark-resignation", response_model=UserResponse)
+async def mark_user_resignation(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """标记用户离职，并根据资产配置自动触发安全检查任务（仅管理员）"""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    
+    if user.status == "离职":
+        raise HTTPException(status_code=400, detail="该用户已经是离职状态")
+
+    print(f"DEBUG: 收到离职请求, 用户ID={user_id}")
+    # 1. 查找名下资产
+    assets = db.query(Asset).filter(Asset.user_id == user_id, Asset.deleted_at == None).all()
+    print(f"DEBUG: 用户 {user_id} 名下资产数量: {len(assets)}")
+    
+    if assets:
+        # 获取自动配置
+        auto_config = db.query(SafetyCheckAutoConfig).first()
+        print(f"DEBUG: 全局配置={auto_config.default_check_type_id if auto_config else '未配置'}")
+        default_type_id = auto_config.default_check_type_id if auto_config else None
+        
+        # 获取所有映射
+        mappings = {m.asset_type: m.check_type_id for m in db.query(SafetyCheckAssetTypeMapping).all()}
+        print(f"DEBUG: 映射数量={len(mappings)}")
+        
+        # 按类型对资产分类
+        tasks_to_create = {} # {type_id: [asset_ids]}
+        
+        for asset in assets:
+            # 优先匹配映射，否则使用全局默认
+            type_id = mappings.get(asset.name) or default_type_id
+            print(f"DEBUG: 资产 {asset.name} 匹配到的类型ID={type_id}")
+            if type_id:
+                if type_id not in tasks_to_create:
+                    tasks_to_create[type_id] = []
+                tasks_to_create[type_id].append(asset.id)
+        
+        print(f"DEBUG: 计划创建的任务数={len(tasks_to_create)}")
+        
+        # 创建安全检查任务
+        for type_id, asset_ids in tasks_to_create.items():
+            # 生成任务编号: SC-RESIGN-日期-用户ID-类型ID-随机数
+            import random
+            ts_str = datetime.now().strftime('%Y%m%d%H%M%S')
+            task_number = f"SC-RESIGN-{ts_str}-{user_id}-{type_id}-{random.randint(100, 999)}"
+            
+            task = SafetyCheckTask(
+                task_number=task_number,
+                check_type_id=type_id,
+                title=f"离职安全检查 - {user.real_name}",
+                description=f"用户 {user.real_name} 离职触发的自动安全检查任务",
+                status="pending",
+                source="resignation",
+                created_by_id=current_user.id
+            )
+            db.add(task)
+            db.flush() # 确保获取到 task.id
+            
+            for aid in asset_ids:
+                ta = TaskAsset(
+                    task_id=task.id,
+                    asset_id=aid,
+                    assigned_user_id=user_id,
+                    status="pending"
+                )
+                db.add(ta)
+    
+    # 2. 更新用户状态
+    user.status = "离职"
+    db.commit()
+    db.refresh(user)
+    return UserResponse.model_validate(user)
+
+
 @router.put("/{user_id}", response_model=UserResponse)
 async def update_user(
     user_id: int,
@@ -147,6 +226,8 @@ async def delete_user(
     db.delete(user)
     db.commit()
     return {"message": "用户已删除"}
+
+
 
 
 @router.post("/import", response_model=ImportResponse)

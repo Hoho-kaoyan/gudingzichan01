@@ -83,6 +83,10 @@ async def get_assets(
             )
         )
     
+    # 组长只能看到本组资产
+    if current_user.role == "leader":
+        query = query.filter(Asset.user_group == current_user.group)
+    
     assets = query.offset(skip).limit(limit).all()
     return [AssetResponse.model_validate(asset) for asset in assets]
 
@@ -192,14 +196,28 @@ async def create_asset(
     
     asset_dict = asset_data.dict()
 
-    # 如果是普通用户，强制将资产归属到自己，并设置默认状态
+    # 如果是普通用户或组长，强制将资产归属到自己的组
     if current_user.role != "admin":
-        asset_dict["user_id"] = current_user.id
-        asset_dict["user_group"] = current_user.group
+        # 组长可以选择使用人，但默认组别必须是自己的组
+        if current_user.role == "leader":
+            user_id = asset_dict.get("user_id")
+            if user_id:
+                user = db.query(User).filter(User.id == user_id).first()
+                if not user or user.group != current_user.group:
+                    raise HTTPException(status_code=403, detail="组长只能将资产分配给本组人员")
+                asset_dict["user_group"] = current_user.group
+            else:
+                asset_dict["user_group"] = current_user.group
+        else:
+            # 普通用户强制归属自己
+            asset_dict["user_id"] = current_user.id
+            asset_dict["user_group"] = current_user.group
+
         # 普通用户不能设置状态，默认设置为"在用"
-        if "status" in asset_dict:
-            del asset_dict["status"]  # 移除用户提交的状态
-        asset_dict["status"] = "在用"  # 默认设置为"在用"
+        if current_user.role == "user":
+            if "status" in asset_dict:
+                del asset_dict["status"]
+            asset_dict["status"] = "在用"
     else:
         # 管理员创建时，如指定了使用人则检查
         user_id = asset_dict.get("user_id")
@@ -602,30 +620,38 @@ async def import_assets(
                     db.add(category)
                     db.flush()
                 
+                # 定义辅助函数：安全获取字段值，处理 NaN 和 None
+                def get_val(col_name):
+                    val = row.get(col_name)
+                    if pd.isna(val) or val is None or str(val).strip().lower() == 'nan':
+                        return None
+                    return str(val).strip()
+
+                # 定义辅助函数：安全执行 lower() 比较
+                def is_not_nan(val):
+                    if val is None:
+                        return False
+                    return str(val).lower() != 'nan'
+
                 # 获取其他字段
-                specification = str(row.get('规格型号', '')).strip() if '规格型号' in df.columns else None
-                status = str(row.get('状态', '在用')).strip() if '状态' in df.columns else '在用'
+                specification = get_val('规格型号')
+                status = get_val('状态') or '在用'
                 if status == '库存备用':
-                    status = '在库'  # 统一表述
-                mac_address = str(row.get('MAC地址', '')).strip() if 'MAC地址' in df.columns else None
-                ip_address = str(row.get('IP地址', '')).strip() if 'IP地址' in df.columns else None
-                office_location = str(row.get('存放办公地点', '')).strip() if '存放办公地点' in df.columns else None
-                floor = str(row.get('存放楼层', '')).strip() if '存放楼层' in df.columns else None
-                seat_number = str(row.get('座位号', '')).strip() if '座位号' in df.columns else None
-                # 处理被 pandas 识别为浮点数的 EHR 号 (1234561.0 -> 1234561)
-                raw_user_ehr = str(row.get('使用人EHR号', '')).strip() if '使用人EHR号' in df.columns else ''
-                if raw_user_ehr.endswith('.0'):
-                    user_ehr = raw_user_ehr[:-2]
-                else:
-                    user_ehr = raw_user_ehr
+                    status = '在库'
+                mac_address = get_val('MAC地址')
+                ip_address = get_val('IP地址')
+                office_location = get_val('存放办公地点')
+                floor = get_val('存放楼层')
+                seat_number = get_val('座位号')
+                
+                # 处理使用人EHR号：处理 NaN 和空值
+                user_ehr = get_val('使用人EHR号')
+                if user_ehr and user_ehr.endswith('.0'):
+                    user_ehr = user_ehr[:-2]
                     
                 # 支持两种列名：使用人组别 或 组别
-                user_group = None
-                if '使用人组别' in df.columns:
-                    user_group = str(row.get('使用人组别', '')).strip() or None
-                elif '组别' in df.columns:
-                    user_group = str(row.get('组别', '')).strip() or None
-                remark = str(row.get('备注说明', '')).strip() if '备注说明' in df.columns else None
+                user_group = get_val('使用人组别') or get_val('组别')
+                remark = get_val('备注说明')
                 
                 # 如果提供了使用人EHR号，查找用户
                 user_id = None
@@ -636,42 +662,30 @@ async def import_assets(
                         if not user_group:
                             user_group = user.group
                     else:
-                        error_count += 1
-                        error_msg = f"使用人EHR号{user_ehr}不存在"
-                        errors.append(f"第{row_number}行：{error_msg}")
-                        # 转换行数据为字典，处理NaN值
-                        row_data_dict = {}
-                        for k, v in row_data.items():
-                            if pd.isna(v) or v is None:
-                                row_data_dict[k] = ''
-                            else:
-                                row_data_dict[k] = str(v)
-                        
-                        error_details.append({
-                            "row_number": row_number,
-                            "error_message": error_msg,
-                            "row_data": row_data_dict
-                        })
-                        continue
+                        # EHR号存在但不匹配系统用户，按用户要求：状态设为“在库”
+                        status = '在库'
+                else:
+                    # EHR号不存在或为nan，按用户要求：状态设为“在库”
+                    status = '在库'
                 
                 # 创建资产
                 db_asset = Asset(
                     asset_number=asset_number,
                     category_id=category.id,
                     name=name,
-                    specification=specification if specification else None,
+                    specification=specification,
                     status=status,
-                    mac_address=mac_address if mac_address else None,
-                    ip_address=ip_address if ip_address else None,
-                    office_location=office_location if office_location else None,
-                    floor=floor if floor else None,
-                    seat_number=seat_number if seat_number else None,
+                    mac_address=mac_address,
+                    ip_address=ip_address,
+                    office_location=office_location,
+                    floor=floor,
+                    seat_number=seat_number,
                     user_id=user_id,
-                    user_group=user_group if user_group else None,
-                    remark=remark if remark else None
+                    user_group=user_group,
+                    remark=remark
                 )
                 db.add(db_asset)
-                db.flush() # 先flush以获取 db_asset.id
+                db.flush() 
                 
                 # 【新增逻辑】：批量入库场景下，若指定了使用人，进行联动安检派单
                 if db_asset.user_id:
@@ -688,16 +702,12 @@ async def import_assets(
                 success_count += 1
                 
             except Exception as e:
+                db.rollback() # 重要：发生冲突（如数据库已有重号）时必须回滚，否则Session会失效无法处理后续行
                 error_count += 1
                 error_msg = str(e)
                 errors.append(f"第{row_number}行：{error_msg}")
                 # 转换行数据为字典，处理NaN值
-                row_data_dict = {}
-                for k, v in row_data.items():
-                    if pd.isna(v) or v is None:
-                        row_data_dict[k] = ''
-                    else:
-                        row_data_dict[k] = str(v)
+                row_data_dict = {k: ('' if pd.isna(v) or str(v).lower() == 'nan' else str(v)) for k, v in row_data.items()}
                 
                 error_details.append({
                     "row_number": row_number,

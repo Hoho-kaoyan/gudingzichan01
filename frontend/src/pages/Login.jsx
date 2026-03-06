@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Form, Input, Button, Card, message } from 'antd'
+import { Form, Input, Button, Card, message, Alert } from 'antd'
+
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -9,6 +10,8 @@ const Login = () => {
   const [loading, setLoading] = useState(false)
   const [ehrChecked, setEhrChecked] = useState(false)
   const [userName, setUserName] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
+
   const navigate = useNavigate()
   const { login, checkEHR } = useAuth()
 
@@ -35,13 +38,33 @@ const Login = () => {
     }
 
     setLoading(true)
-    const success = await login(values.ehr_number, values.password)
-    setLoading(false)
+    setErrorMsg('')
+    try {
+      const success = await login(values.ehr_number, values.password)
+      if (success) {
+        navigate('/dashboard')
+      }
+    } catch (error) {
+      // 处理具体的错误显示
+      const detail = error.response?.data?.detail
+      if (detail) {
+        setErrorMsg(detail)
+      } else {
+        setErrorMsg('登录失败，请检查密码是否正确')
+      }
 
-    if (success) {
-      navigate('/dashboard')
+      // 核心要求：不刷新页面，仅清空密码，保留 EHR 号
+      form.setFieldsValue({ password: '' })
+
+      // 注意：这里由于 AuthContext 不再处理 message，我们需要在此处决定是否弹出气泡消息
+      // 用户既然要求了“保留提示”且我已经加了 Alert，气泡消息可以保持同步或仅使用 Alert
+    } finally {
+      setLoading(false)
     }
   }
+
+
+
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f0f2f5' }}>
@@ -94,6 +117,18 @@ const Login = () => {
               placeholder="请输入密码"
             />
           </Form.Item>
+
+          {errorMsg && (
+            <Alert
+              message={errorMsg}
+              type="error"
+              showIcon
+              closable
+              onClose={() => setErrorMsg('')}
+              style={{ marginBottom: 24 }}
+            />
+          )}
+
 
           <Form.Item>
             <Button type="primary" htmlType="submit" block loading={loading} size="large" style={{ fontSize: 16, height: 48 }}>

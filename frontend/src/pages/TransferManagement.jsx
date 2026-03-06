@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag, AutoComplete } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag, AutoComplete, Typography } from 'antd'
 import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -13,11 +13,12 @@ const MY_TASKS_PATH = '/my-safety-check-tasks'
 
 const TransferManagement = () => {
   const navigate = useNavigate()
-  const { user: currentUser, isAdmin } = useAuth()
+  const { user: currentUser, isAdmin, isLeader, isAdminOrLeader } = useAuth()
   const { refreshPendingConfirmations, refreshPendingApprovals } = useTransfer()
   const [transfers, setTransfers] = useState([])
   const [assets, setAssets] = useState([])
   const [userOptions, setUserOptions] = useState([])
+  const [users, setUsers] = useState([])
   const [toUserSearchValue, setToUserSearchValue] = useState('')
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
@@ -28,6 +29,7 @@ const TransferManagement = () => {
   const [confirmForm] = Form.useForm()
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
+  const [expandedComments, setExpandedComments] = useState({})
 
   useEffect(() => {
     fetchTransfers()
@@ -85,6 +87,7 @@ const TransferManagement = () => {
   const fetchUsers = async () => {
     try {
       const response = await api.get('/users/')
+      setUsers(response.data || [])
       const options = (response.data || []).map(user => ({
         label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
         value: user.id,
@@ -241,22 +244,41 @@ const TransferManagement = () => {
     {
       title: '转入人意见',
       key: 'to_user_confirm',
-      width: 200,
+      width: 250,
       render: (_, record) => {
         // 待确认
         if (record.to_user_confirmed === null || record.to_user_confirmed === undefined) {
           return <Tag color="default">待确认</Tag>
         }
+
+        const isExpanded = !!expandedComments[record.id]
+
+        const renderCommentContent = () => (
+          <div style={{ color: '#666', fontSize: '12px', marginTop: 4 }}>
+            <Typography.Paragraph
+              ellipsis={isExpanded ? false : { rows: 2 }}
+              style={{ marginBottom: 4 }}
+            >
+              {record.to_user_confirm_comment}
+            </Typography.Paragraph>
+            <a
+              style={{ color: '#1677ff', fontSize: '12px' }}
+              onClick={(e) => {
+                e.stopPropagation()
+                setExpandedComments(prev => ({ ...prev, [record.id]: !isExpanded }))
+              }}
+            >
+              {isExpanded ? '收起' : '展开'}
+            </a>
+          </div>
+        )
+
         // 已确认
         if (record.to_user_confirmed === 1) {
           return (
-            <div>
+            <div key={`confirm-${record.id}`}>
               <Tag color="success" style={{ marginBottom: 4 }}>✓ 已确认</Tag>
-              {record.to_user_confirm_comment && (
-                <div style={{ color: '#666', fontSize: '12px', marginTop: 4, wordBreak: 'break-word' }}>
-                  {record.to_user_confirm_comment}
-                </div>
-              )}
+              {record.to_user_confirm_comment && renderCommentContent()}
               {record.to_user_confirmed_at && (
                 <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
                   {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
@@ -268,13 +290,9 @@ const TransferManagement = () => {
         // 已拒绝
         if (record.to_user_confirmed === 0) {
           return (
-            <div>
+            <div key={`reject-${record.id}`}>
               <Tag color="error" style={{ marginBottom: 4 }}>✗ 已拒绝</Tag>
-              {record.to_user_confirm_comment && (
-                <div style={{ color: '#666', fontSize: '12px', marginTop: 4, wordBreak: 'break-word' }}>
-                  {record.to_user_confirm_comment}
-                </div>
-              )}
+              {record.to_user_confirm_comment && renderCommentContent()}
               {record.to_user_confirmed_at && (
                 <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
                   {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
@@ -306,19 +324,19 @@ const TransferManagement = () => {
         const isToUser = record.to_user_id === currentUser?.id
         const isFromUser = record.from_user_id === currentUser?.id
         const isAdmin = currentUser?.role === 'admin'
-        
+
         // 转入人可以确认或拒绝待确认的申请
         const canConfirm = isToUser && record.status === 'waiting_confirmation'
-        
+
         // 转出用户或管理员可以撤回待确认或待审批的申请
-        const canCancel = (isFromUser || isAdmin) && 
-                         (record.status === 'waiting_confirmation' || record.status === 'pending')
-        
+        const canCancel = (isFromUser || isAdmin) &&
+          (record.status === 'waiting_confirmation' || record.status === 'pending')
+
         return (
           <Space>
             {canConfirm && (
-              <Button 
-                type="link" 
+              <Button
+                type="link"
                 icon={<CheckCircleOutlined />}
                 size="small"
                 onClick={() => handleConfirm(record)}
@@ -333,9 +351,9 @@ const TransferManagement = () => {
                 okText="确定"
                 cancelText="取消"
               >
-                <Button 
-                  type="link" 
-                  danger 
+                <Button
+                  type="link"
+                  danger
                   icon={<CloseCircleOutlined />}
                   size="small"
                 >
@@ -349,7 +367,15 @@ const TransferManagement = () => {
     }
   ]
 
-  const selectableAssets = isAdmin ? assets : assets.filter((asset) => asset.user?.id === currentUser?.id)
+  // 可选资产逻辑：
+  // 1. 管理员：全量“在用”资产
+  // 2. 组长：所属组的“在用”资产
+  // 3. 普通用户：个人名下的“在用”资产
+  const selectableAssets = isAdmin
+    ? assets
+    : isLeader
+      ? assets.filter(asset => asset.user_group === currentUser?.group)
+      : assets.filter(asset => asset.user?.id === currentUser?.id)
 
   return (
     <div>
@@ -438,14 +464,23 @@ const TransferManagement = () => {
             <AutoComplete
               value={toUserSearchValue}
               options={userOptions
-                .filter(option => option.value !== currentUser?.id && option.ehrNumber !== '1000000')
+                .filter(option => {
+                  const isNotSelf = option.value !== currentUser?.id
+                  const isNotWarehouse = option.ehrNumber !== '1000000'
+                  // 组长发起时，接收人必须是本组组员
+                  if (isLeader) {
+                    const user = users.find(u => u.id === option.value)
+                    return isNotSelf && isNotWarehouse && user?.group === currentUser?.group
+                  }
+                  return isNotSelf && isNotWarehouse
+                })
                 .filter(option => option.label.toLowerCase().includes((toUserSearchValue || '').toLowerCase()))
-                .slice(0, 5)
                 .map(option => ({
                   value: option.label,
                   userId: option.value
                 }))
               }
+              dropdownStyle={{ maxHeight: 300, overflow: 'auto' }}
               placeholder="请输入转入人姓名或EHR号"
               onSearch={(value) => {
                 setToUserSearchValue(value)
@@ -477,7 +512,7 @@ const TransferManagement = () => {
                 <div style={{ color: '#ff4d4f', marginTop: 4, fontSize: 12 }}>
                   此用户不存在
                 </div>
-            )}
+              )}
           </Form.Item>
           <Form.Item
             label="交接原因"
@@ -485,66 +520,66 @@ const TransferManagement = () => {
           >
             <Input.TextArea rows={4} />
           </Form.Item>
-          </Form>
-        </Modal>
+        </Form>
+      </Modal>
 
-        {/* 转入人确认弹窗 */}
-        <Modal
-          title="确认资产交接"
-          open={confirmModalVisible}
-          onCancel={() => {
-            setConfirmModalVisible(false)
-            setCurrentTransfer(null)
-          }}
-          footer={null}
+      {/* 转入人确认弹窗 */}
+      <Modal
+        title="确认资产交接"
+        open={confirmModalVisible}
+        onCancel={() => {
+          setConfirmModalVisible(false)
+          setCurrentTransfer(null)
+        }}
+        footer={null}
+      >
+        {currentTransfer && (
+          <div style={{ marginBottom: 16 }}>
+            <p><strong>资产编号：</strong>{currentTransfer.asset?.asset_number}</p>
+            <p><strong>资产名称：</strong>{currentTransfer.asset?.name}</p>
+            <p><strong>转出人：</strong>{currentTransfer.from_user?.real_name}</p>
+            <p><strong>交接原因：</strong>{currentTransfer.reason || '无'}</p>
+          </div>
+        )}
+        <Form
+          form={confirmForm}
+          layout="vertical"
+          onFinish={handleConfirmSubmit}
         >
-          {currentTransfer && (
-            <div style={{ marginBottom: 16 }}>
-              <p><strong>资产编号：</strong>{currentTransfer.asset?.asset_number}</p>
-              <p><strong>资产名称：</strong>{currentTransfer.asset?.name}</p>
-              <p><strong>转出人：</strong>{currentTransfer.from_user?.real_name}</p>
-              <p><strong>交接原因：</strong>{currentTransfer.reason || '无'}</p>
-            </div>
-          )}
-          <Form
-            form={confirmForm}
-            layout="vertical"
-            onFinish={handleConfirmSubmit}
+          <Form.Item
+            label="操作"
+            name="action"
+            rules={[{ required: true, message: '请选择操作' }]}
           >
-            <Form.Item
-              label="操作"
-              name="action"
-              rules={[{ required: true, message: '请选择操作' }]}
-            >
-              <Select>
-                <Option value="confirm">确认接收</Option>
-                <Option value="reject">拒绝接收</Option>
-              </Select>
-            </Form.Item>
-            <Form.Item
-              label="备注"
-              name="comment"
-            >
-              <Input.TextArea rows={4} placeholder="请输入确认备注（可选）" />
-            </Form.Item>
-            <Form.Item>
-              <Space>
-                <Button onClick={() => {
-                  setConfirmModalVisible(false)
-                  setCurrentTransfer(null)
-                }}>
-                  取消
-                </Button>
-                <Button type="primary" htmlType="submit">
-                  提交
-                </Button>
-              </Space>
-            </Form.Item>
-          </Form>
-        </Modal>
-      </div>
-    )
-  }
-  
-  export default TransferManagement
+            <Select>
+              <Option value="confirm">确认接收</Option>
+              <Option value="reject">拒绝接收</Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            label="备注"
+            name="comment"
+          >
+            <Input.TextArea rows={4} placeholder="请输入确认备注（可选）" />
+          </Form.Item>
+          <Form.Item>
+            <Space>
+              <Button onClick={() => {
+                setConfirmModalVisible(false)
+                setCurrentTransfer(null)
+              }}>
+                取消
+              </Button>
+              <Button type="primary" htmlType="submit">
+                提交
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </div>
+  )
+}
+
+export default TransferManagement
 

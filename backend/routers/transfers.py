@@ -49,8 +49,20 @@ async def get_transfer_requests(
     """获取交接申请列表,支持搜索"""
     query = db.query(TransferRequest)
     
-    # 普通用户只能看到自己相关的申请
-    if current_user.role != "admin":
+    # 普通用户/组长权限过滤
+    if current_user.role == "leader":
+        # 组长可以看到本组用户作为转出人或转入人的所有申请
+        # 简化逻辑：获取本组所有用户的ID列表，然后过滤
+        user_ids_in_group = [u[0] for u in db.query(User.id).filter(User.group == current_user.group).all()]
+        query = query.filter(
+            or_(
+                TransferRequest.from_user_id.in_(user_ids_in_group),
+                TransferRequest.to_user_id.in_(user_ids_in_group)
+            )
+        )
+    elif current_user.role == "user":
+
+        # 普通用户只能看到自己相关的申请
         query = query.filter(
             (TransferRequest.from_user_id == current_user.id) |
             (TransferRequest.to_user_id == current_user.id)
@@ -159,9 +171,23 @@ async def create_transfer_request(
     if from_user_id == transfer_data.to_user_id:
         raise HTTPException(status_code=400, detail="不能将资产转给自己")
     
-    # 检查资产是否属于当前用户（普通用户只能交接自己的资产）
-    if current_user.role != "admin" and asset.user_id != current_user.id:
-        raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
+    # 检查权限：
+    # 1. 管理员：可以代任何人发起
+    # 2. 组长：只能为本组员发起，且接收人也必须是本组成员（满足用户“调拨按钮与范围限定本组”要求）
+    # 3. 普通用户：只能为自己发起
+    if current_user.role == "admin":
+        pass 
+    elif current_user.role == "leader":
+        # 验证转出资产是否属于本组
+        if asset.user_group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能交接本组关联的资产")
+        # 验证接收人是否属于本组
+        if to_user.group != current_user.group:
+            raise HTTPException(status_code=403, detail="组长只能将资产交接给本组人员")
+    else:
+        # 普通用户只能交接自己的资产
+        if asset.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
 
     # 【干预点1：创建交接申请前，拦截未完成安检】
     check_unfinished_tasks_for_asset_user(db, asset.id, from_user_id)

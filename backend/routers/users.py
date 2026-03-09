@@ -13,6 +13,7 @@ from auth import get_current_user, get_current_admin_user, get_password_hash
 import pandas as pd
 import io
 from datetime import datetime
+from excel_io import cell_to_str, row_to_error_dict
 
 router = APIRouter()
 
@@ -278,9 +279,6 @@ async def import_users(
         contents = await file.read()
         df = pd.read_excel(io.BytesIO(contents))
         
-        # 将空单元格 (NaN) 全部替换为空字符串
-        df = df.fillna('')
-        
         # 验证必需的列
         required_columns = ['EHR号', '姓名', '组别']
         for col in required_columns:
@@ -300,18 +298,13 @@ async def import_users(
             row_data = row.to_dict()  # 保存原始行数据
             
             try:
-                # 处理可能被 pandas 识别为浮点数的 EHR 号 (例如 1234561.0 -> 1234561)
-                raw_ehr = str(row['EHR号']).strip()
-                if raw_ehr.endswith('.0'):
-                    ehr_number = raw_ehr[:-2]
-                else:
-                    ehr_number = raw_ehr
-                    
-                real_name = str(row['姓名']).strip()
-                group = str(row['组别']).strip()
-                role = str(row.get('角色', 'user')).strip() if '角色' in df.columns else 'user'
-                status = str(row.get('状态', '在岗')).strip() if '状态' in df.columns else '在岗'
-                password = str(row.get('密码', '123456')).strip() if '密码' in df.columns else '123456'
+                # 单元格先转字符串（空/NaN→''，数字浮点去 .0），再当字符串用
+                ehr_number = cell_to_str(row.get('EHR号', ''))
+                real_name = cell_to_str(row.get('姓名', ''))
+                group = cell_to_str(row.get('组别', ''))
+                role = cell_to_str(row.get('角色', '')) or 'user'
+                status = cell_to_str(row.get('状态', '')) or '在岗'
+                password = cell_to_str(row.get('密码', '')) or '123456'
                 
                 if not ehr_number or not real_name or not group:
                     raise ValueError("EHR号、姓名、组别均不能为空")
@@ -321,17 +314,10 @@ async def import_users(
                     error_count += 1
                     error_msg = "EHR号格式错误（必须为7位数字）"
                     errors.append(f"第{row_number}行：{error_msg}")
-                    # 转换行数据为字典，处理NaN值
-                    row_data_dict = {}
-                    for k, v in row_data.items():
-                        if pd.isna(v) or v is None:
-                            row_data_dict[k] = ''
-                        else:
-                            row_data_dict[k] = str(v)
                     error_details.append({
                         "row_number": row_number,
                         "error_message": error_msg,
-                        "row_data": row_data_dict
+                        "row_data": row_to_error_dict(row_data)
                     })
                     continue
                 
@@ -341,8 +327,7 @@ async def import_users(
                     error_count += 1
                     error_msg = f"EHR号{ehr_number}已存在"
                     errors.append(f"第{row_number}行：{error_msg}")
-                    row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
-                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
+                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                     continue
                 
                 if existing_user and existing_user.deleted_at is not None:
@@ -374,17 +359,10 @@ async def import_users(
                 error_count += 1
                 error_msg = str(e)
                 errors.append(f"第{row_number}行：{error_msg}")
-                # 转换行数据为字典，处理NaN值
-                row_data_dict = {}
-                for k, v in row_data.items():
-                    if pd.isna(v) or v is None:
-                        row_data_dict[k] = ''
-                    else:
-                        row_data_dict[k] = str(v)
                 error_details.append({
                     "row_number": row_number,
                     "error_message": error_msg,
-                    "row_data": row_data_dict
+                    "row_data": row_to_error_dict(row_data)
                 })
         
         db.commit()

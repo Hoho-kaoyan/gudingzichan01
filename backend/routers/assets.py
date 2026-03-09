@@ -13,6 +13,7 @@ from auth import get_current_user
 import pandas as pd
 import io
 from fastapi.responses import StreamingResponse
+from excel_io import cell_to_str, row_cell_str, str_to_int, cell_to_date, row_to_error_dict
 from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
@@ -592,38 +593,6 @@ async def import_assets(
                     detail=f"Excel文件缺少必需的列：{col}"
                 )
         
-        def _row_str(row, df_cols, *col_names, default=""):
-            """从行中取第一个存在的列的值，strip 后返回，空或 NaN 返回 default。"""
-            for c in col_names:
-                if c in df_cols:
-                    v = row.get(c, default)
-                    if v is None or (hasattr(v, "__iter__") and not isinstance(v, str) and pd.isna(v)):
-                        return default
-                    s = str(v).strip()
-                    return s if s else default
-            return default
-        
-        def _row_date(row, df_cols, col_name):
-            """解析购置日期列为 date 或 None。"""
-            if col_name not in df_cols:
-                return None
-            v = row.get(col_name)
-            if v is None or pd.isna(v):
-                return None
-            if hasattr(v, "date"):
-                return v.date()
-            s = str(v).strip()[:10]
-            if not s:
-                return None
-            try:
-                from datetime import datetime as _dt
-                return _dt.strptime(s, "%Y-%m-%d").date()
-            except Exception:
-                try:
-                    return pd.to_datetime(s).date()
-                except Exception:
-                    return None
-        
         success_count = 0
         error_count = 0
         skip_count = 0
@@ -635,9 +604,10 @@ async def import_assets(
             row_data = row.to_dict()  # 保存原始行数据
             
             try:
-                asset_number = str(row['资产编号']).strip()
-                category_name = str(row['所属大类']).strip()
-                name = str(row['实物名称']).strip()
+                # 单元格先转字符串（空/NaN→''，数字浮点去 .0），再按 DB 类型用
+                asset_number = cell_to_str(row.get('资产编号', ''))
+                category_name = cell_to_str(row.get('所属大类', ''))
+                name = cell_to_str(row.get('实物名称', ''))
                 
                 # 按资产编号查库（含已逻辑删除），用于判断：未删除则跳过，已删除则恢复+更新
                 existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
@@ -653,62 +623,43 @@ async def import_assets(
                     db.add(category)
                     db.flush()
                 
-                # 定义辅助函数：安全获取字段值，处理 NaN 和 None
-                def get_val(col_name):
-                    val = row.get(col_name)
-                    if pd.isna(val) or val is None or str(val).strip().lower() == 'nan':
-                        return None
-                    return str(val).strip()
-
-                # 定义辅助函数：安全执行 lower() 比较
-                def is_not_nan(val):
-                    if val is None:
-                        return False
-                    return str(val).lower() != 'nan'
-
-                # 获取其他字段
-                specification = get_val('规格型号')
-                status = get_val('状态') or '在用'
+                specification = row_cell_str(row, df.columns, '规格型号') or None
+                status = row_cell_str(row, df.columns, '状态') or '在用'
                 if status == '库存备用':
                     status = '在库'
-                mac_address = _row_str(row, df.columns, '终端mac地址', 'MAC地址') or None
-                ip_address = _row_str(row, df.columns, '终端IP号', 'IP地址') or None
-                office_location = _row_str(row, df.columns, '存放办公地点') or None
-                floor = _row_str(row, df.columns, '具体存放楼层', '存放楼层') or None
-                seat_number = _row_str(row, df.columns, '座位号') or None
-                user_group = _row_str(row, df.columns, '使用人组别', '组別', '组别') or None
-                remark = _row_str(row, df.columns, '备注说明') or None
-                # 扩展字段
-                quantity_val = _row_str(row, df.columns, '件数')
-                quantity = int(quantity_val) if quantity_val.isdigit() else (1 if not quantity_val else None)
+                mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
+                ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
+                office_location = row_cell_str(row, df.columns, '存放办公地点') or None
+                floor = row_cell_str(row, df.columns, '具体存放楼层', '存放楼层') or None
+                seat_number = row_cell_str(row, df.columns, '座位号') or None
+                user_group = row_cell_str(row, df.columns, '使用人组别', '组別', '组别') or None
+                remark = row_cell_str(row, df.columns, '备注说明') or None
+                quantity = str_to_int(row_cell_str(row, df.columns, '件数'), default=None)
                 if quantity is not None and quantity < 1:
                     quantity = 1
-                team = _row_str(row, df.columns, '所在团队') or None
-                purchase_date = _row_date(row, df.columns, '购置日期')
-                card_number = _row_str(row, df.columns, '卡片编号') or None
-                computer_type = _row_str(row, df.columns, '电脑类型') or None
-                computer_usage = _row_str(row, df.columns, '电脑应用') or None
-                computer_name = _row_str(row, df.columns, '计算机名') or None
-                monitor1_model = _row_str(row, df.columns, '连接显示器1型号') or None
-                monitor1_asset_number = _row_str(row, df.columns, '连接显示器1资产编号') or None
-                monitor1_serial = _row_str(row, df.columns, '显示器1 序列号', '显示器1序列号') or None
-                monitor2_model = _row_str(row, df.columns, '连接显示器2', '连接显示器2型号') or None
-                monitor2_asset_number = _row_str(row, df.columns, '连接显示器2资产编号') or None
-                monitor2_serial = _row_str(row, df.columns, '显示器2序列号') or None
-                asset_contact = _row_str(row, df.columns, '资产管理联系人') or None
-                reserve_1 = _row_str(row, df.columns, '预留1') or None
-                reserve_2 = _row_str(row, df.columns, '预留2') or None
-                reserve_3 = _row_str(row, df.columns, '预留3') or None
-                reserve_4 = _row_str(row, df.columns, '预留4') or None
-                reserve_5 = _row_str(row, df.columns, '预留5') or None
-                reserve_6 = _row_str(row, df.columns, '预留6') or None
-                # 安全检查执行人：支持「安全检查执行人」填姓名、「安全检查执行人ID」填ID；姓名会落库并解析为ID用于派单
-                safety_check_executor_id = None
-                safety_check_executor_name = _row_str(row, df.columns, '安全检查执行人') or None
-                if '安全检查执行人ID' in df.columns:
-                    seid_val = _row_str(row, df.columns, '安全检查执行人ID')
-                    if seid_val and seid_val.isdigit():
-                        safety_check_executor_id = int(seid_val)
+                if quantity is None:
+                    quantity = 1
+                team = row_cell_str(row, df.columns, '所在团队') or None
+                purchase_date = cell_to_date(row.get('购置日期')) if '购置日期' in df.columns else None
+                card_number = row_cell_str(row, df.columns, '卡片编号') or None
+                computer_type = row_cell_str(row, df.columns, '电脑类型') or None
+                computer_usage = row_cell_str(row, df.columns, '电脑应用') or None
+                computer_name = row_cell_str(row, df.columns, '计算机名') or None
+                monitor1_model = row_cell_str(row, df.columns, '连接显示器1型号') or None
+                monitor1_asset_number = row_cell_str(row, df.columns, '连接显示器1资产编号') or None
+                monitor1_serial = row_cell_str(row, df.columns, '显示器1 序列号', '显示器1序列号') or None
+                monitor2_model = row_cell_str(row, df.columns, '连接显示器2', '连接显示器2型号') or None
+                monitor2_asset_number = row_cell_str(row, df.columns, '连接显示器2资产编号') or None
+                monitor2_serial = row_cell_str(row, df.columns, '显示器2序列号') or None
+                asset_contact = row_cell_str(row, df.columns, '资产管理联系人') or None
+                reserve_1 = row_cell_str(row, df.columns, '预留1') or None
+                reserve_2 = row_cell_str(row, df.columns, '预留2') or None
+                reserve_3 = row_cell_str(row, df.columns, '预留3') or None
+                reserve_4 = row_cell_str(row, df.columns, '预留4') or None
+                reserve_5 = row_cell_str(row, df.columns, '预留5') or None
+                reserve_6 = row_cell_str(row, df.columns, '预留6') or None
+                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '安全检查执行人ID'), default=None)
+                safety_check_executor_name = row_cell_str(row, df.columns, '安全检查执行人') or None
                 if safety_check_executor_id is None and safety_check_executor_name:
                     u = db.query(User).filter(
                         User.real_name == safety_check_executor_name.strip(),
@@ -718,21 +669,15 @@ async def import_assets(
                         safety_check_executor_id = u.id
                 
                 # 解析使用人（所有人）：优先所有人ID，否则所有人（姓名），否则使用人EHR号
-                user_id = None
-                if '所有人ID' in df.columns:
-                    uid_val = _row_str(row, df.columns, '所有人ID')
-                    if uid_val and uid_val.replace('.', '').isdigit():
-                        try:
-                            user_id = int(float(uid_val))
-                            u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
-                            if not u:
-                                user_id = None
-                            elif not user_group:
-                                user_group = u.group
-                        except (ValueError, TypeError):
-                            user_id = None
+                user_id = str_to_int(row_cell_str(row, df.columns, '所有人ID'), default=None)
+                if user_id is not None:
+                    u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+                    if not u:
+                        user_id = None
+                    elif not user_group:
+                        user_group = u.group
                 if user_id is None:
-                    owner_name = _row_str(row, df.columns, '所有人')
+                    owner_name = row_cell_str(row, df.columns, '所有人')
                     if owner_name:
                         u = db.query(User).filter(
                             User.real_name == owner_name.strip(),
@@ -746,16 +691,10 @@ async def import_assets(
                             error_count += 1
                             error_msg = f"所有人「{owner_name}」未找到对应用户"
                             errors.append(f"第{row_number}行：{error_msg}")
-                            row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
-                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
+                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                             continue
                 if user_id is None:
-                    raw_user_ehr = _row_str(row, df.columns, '使用人EHR号') or ""
-                    raw_user_ehr = str(raw_user_ehr).strip()
-                    if raw_user_ehr.endswith('.0'):
-                        user_ehr = raw_user_ehr[:-2]
-                    else:
-                        user_ehr = raw_user_ehr
+                    user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
                     if user_ehr:
                         user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
                         if user:
@@ -766,8 +705,7 @@ async def import_assets(
                             error_count += 1
                             error_msg = f"使用人EHR号{user_ehr}不存在"
                             errors.append(f"第{row_number}行：{error_msg}")
-                            row_data_dict = {k: '' if pd.isna(v) or v is None else str(v) for k, v in row_data.items()}
-                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_data_dict})
+                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                             continue
                 
                 assigned_id = safety_check_executor_id or user_id
@@ -871,13 +809,10 @@ async def import_assets(
                 error_count += 1
                 error_msg = str(e)
                 errors.append(f"第{row_number}行：{error_msg}")
-                # 转换行数据为字典，处理NaN值
-                row_data_dict = {k: ('' if pd.isna(v) or str(v).lower() == 'nan' else str(v)) for k, v in row_data.items()}
-                
                 error_details.append({
                     "row_number": row_number,
                     "error_message": error_msg,
-                    "row_data": row_data_dict
+                    "row_data": row_to_error_dict(row_data)
                 })
         
         db.commit()

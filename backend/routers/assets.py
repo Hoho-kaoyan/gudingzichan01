@@ -624,7 +624,8 @@ async def import_assets(
                     db.flush()
                 
                 specification = row_cell_str(row, df.columns, '规格型号') or None
-                status = row_cell_str(row, df.columns, '状态') or '在用'
+                # 状态：优先读「实物状态」，若无则读「状态」（与《资产导入字段扩展方案》一致）
+                status = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
                 if status == '库存备用':
                     status = '在库'
                 mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None

@@ -20,15 +20,15 @@ const MySafetyCheckTasks = () => {
   const [currentAssetIndex, setCurrentAssetIndex] = useState(0)
   const [form] = Form.useForm()
 
+  // 一次拉取全部任务，用于 Tab 计数与按 Tab 过滤展示，避免切换 Tab 时另一侧数字变 0
   useEffect(() => {
     fetchMyTasks()
-  }, [activeTab])
+  }, [])
 
   const fetchMyTasks = async () => {
     setLoading(true)
     try {
-      const params = activeTab === 'all' ? {} : { status: activeTab }
-      const response = await api.get('/safety-check-results/my-tasks', { params })
+      const response = await api.get('/safety-check-results/my-tasks')
       setTasks(response.data.items || [])
     } catch (error) {
       message.error('获取任务列表失败')
@@ -173,6 +173,13 @@ const MySafetyCheckTasks = () => {
     }
   }
 
+  // 按当前 Tab 过滤展示的任务列表（计数始终基于完整 tasks，避免切换 Tab 时数字变 0）
+  const displayedTasks = activeTab === 'pending'
+    ? tasks.filter(t => t.pending_count > 0)
+    : activeTab === 'checked'
+      ? tasks.filter(t => t.pending_count === 0)
+      : tasks
+
   const tabItems = [
     {
       key: 'pending',
@@ -264,14 +271,14 @@ const MySafetyCheckTasks = () => {
       />
 
       <div>
-        {tasks.length === 0 ? (
+        {displayedTasks.length === 0 ? (
           <Card>
             <div style={{ textAlign: 'center', padding: 40 }}>
               <p>暂无任务</p>
             </div>
           </Card>
         ) : (
-          tasks.map(task => renderTaskCard(task))
+          displayedTasks.map(task => renderTaskCard(task))
         )}
       </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider, Alert } from 'antd'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Tag, Descriptions, Divider, Alert, DatePicker, InputNumber } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, DownloadOutlined, SearchOutlined, ReloadOutlined, HistoryOutlined, FileTextOutlined, CloseCircleOutlined, EyeOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import api from '../utils/api'
@@ -7,6 +7,45 @@ import { useAuth } from '../contexts/AuthContext'
 import ResizableTitle from '../components/ResizableTitle'
 import { parseSafetyCheckError } from '../utils/safetyCheckError'
 import dayjs from 'dayjs'
+
+// 与后端 AssetBase/数据库资产表一致的字段配置，用于动态生成新增/编辑表单
+const ASSET_FORM_FIELDS = [
+  { name: 'asset_number', label: '资产编号', type: 'input', required: true, disabledWhenEdit: true },
+  { name: 'category_id', label: '所属大类', type: 'select_category', required: true },
+  { name: 'name', label: '实物名称', type: 'input', required: true },
+  { name: 'specification', label: '规格型号', type: 'input' },
+  { name: 'status', label: '状态', type: 'select', options: [{ value: '在用', label: '在用' }, { value: '在库', label: '在库' }], adminOnly: true, required: true },
+  { name: 'mac_address', label: 'MAC地址', type: 'input' },
+  { name: 'ip_address', label: 'IP地址', type: 'input' },
+  { name: 'office_location', label: '存放办公地点', type: 'input' },
+  { name: 'floor', label: '存放楼层', type: 'input' },
+  { name: 'seat_number', label: '座位号', type: 'input', placeholder: '非必填' },
+  { name: 'user_id', label: '使用人', type: 'select_user', adminOrLeader: true },
+  { name: 'user_group', label: '使用人组别', type: 'input' },
+  { name: 'remark', label: '备注说明', type: 'textarea', placeholder: '非必填', rows: 3 },
+  { name: 'quantity', label: '件数', type: 'number' },
+  { name: 'team', label: '所在团队', type: 'input' },
+  { name: 'purchase_date', label: '购置日期', type: 'date' },
+  { name: 'card_number', label: '卡片编号', type: 'input' },
+  { name: 'safety_check_executor_id', label: '安全检查执行人', type: 'select_user' },
+  { name: 'safety_check_executor_name', label: '安全检查执行人姓名', type: 'input' },
+  { name: 'computer_type', label: '电脑类型', type: 'input' },
+  { name: 'computer_usage', label: '电脑应用', type: 'input' },
+  { name: 'computer_name', label: '计算机名', type: 'input' },
+  { name: 'monitor1_model', label: '连接显示器1型号', type: 'input' },
+  { name: 'monitor1_asset_number', label: '连接显示器1资产编号', type: 'input' },
+  { name: 'monitor1_serial', label: '显示器1序列号', type: 'input' },
+  { name: 'monitor2_model', label: '连接显示器2型号', type: 'input' },
+  { name: 'monitor2_asset_number', label: '连接显示器2资产编号', type: 'input' },
+  { name: 'monitor2_serial', label: '显示器2序列号', type: 'input' },
+  { name: 'asset_contact', label: '资产管理联系人', type: 'input' },
+  { name: 'reserve_1', label: '预留1', type: 'input' },
+  { name: 'reserve_2', label: '预留2', type: 'input' },
+  { name: 'reserve_3', label: '预留3', type: 'input' },
+  { name: 'reserve_4', label: '预留4', type: 'input' },
+  { name: 'reserve_5', label: '预留5', type: 'input' },
+  { name: 'reserve_6', label: '预留6', type: 'input' }
+]
 
 const AssetManagement = () => {
   const { user: currentUser, isAdmin, isLeader, isAdminOrLeader } = useAuth()
@@ -87,7 +126,7 @@ const AssetManagement = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await api.get('/users/')
+      const response = await api.get('/users/', { params: { limit: 10000 } })
       setUsers(response.data)
     } catch (error) {
       console.error('获取用户列表失败:', error)
@@ -148,7 +187,9 @@ const AssetManagement = () => {
     form.setFieldsValue({
       ...record,
       category_id: record.category?.id,
-      user_id: record.user?.id
+      user_id: record.user?.id,
+      safety_check_executor_id: record.safety_check_executor?.id ?? record.safety_check_executor_id,
+      purchase_date: record.purchase_date ? dayjs(record.purchase_date) : undefined
     })
     fetchUsers()
     fetchCategories()
@@ -167,18 +208,22 @@ const AssetManagement = () => {
 
   const handleSubmit = async (values) => {
     try {
+      const payload = { ...values }
+      if (payload.purchase_date && dayjs.isDayjs(payload.purchase_date)) {
+        payload.purchase_date = payload.purchase_date.format('YYYY-MM-DD')
+      }
       // 普通用户创建/编辑资产时强制绑定到自己
       // 注意：组长权限控制需要等待后端实现权限校验（任务12）
       if (!isAdminOrLeader && currentUser) {
-        values.user_id = currentUser.id
+        payload.user_id = currentUser.id
         // 普通用户不能修改状态，移除status字段
-        if (values.status) {
-          delete values.status
+        if (payload.status) {
+          delete payload.status
         }
       }
       if (editingAsset) {
         try {
-          const response = await api.put(`/assets/${editingAsset.id}`, values)
+          const response = await api.put(`/assets/${editingAsset.id}`, payload)
           // 检查是否是编辑申请（普通用户提交申请）
           if (response.data && response.data.message && response.data.message.includes('编辑申请已提交')) {
             message.success('编辑申请已提交，等待管理员审批')
@@ -210,10 +255,10 @@ const AssetManagement = () => {
         }
       } else {
         // 新增资产时，普通用户和组长不能设置状态（只有管理员可以）
-        if (!isAdmin && values.status) {
-          delete values.status
+        if (!isAdmin && payload.status) {
+          delete payload.status
         }
-        await api.post('/assets/', values)
+        await api.post('/assets/', payload)
         message.success('创建成功')
       }
       setModalVisible(false)
@@ -650,123 +695,98 @@ const AssetManagement = () => {
         onCancel={() => setModalVisible(false)}
         onOk={() => form.submit()}
         width={800}
+        style={{ top: 20 }}
+        bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}
       >
         <Form
           form={form}
           layout="vertical"
           onFinish={handleSubmit}
         >
-          <Form.Item
-            label="资产编号"
-            name="asset_number"
-            rules={[{ required: true, message: '请输入资产编号' }]}
-          >
-            <Input disabled={!!editingAsset} />
-          </Form.Item>
-          <Form.Item
-            label="所属大类"
-            name="category_id"
-            rules={[{ required: true, message: '请选择所属大类' }]}
-          >
-            <Select>
-              {categories.map(cat => (
-                <Select.Option key={cat.id} value={cat.id}>{cat.name}</Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
-          <Form.Item
-            label="实物名称"
-            name="name"
-            rules={[{ required: true, message: '请输入实物名称' }]}
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="规格型号"
-            name="specification"
-          >
-            <Input />
-          </Form.Item>
-          {/* 只有管理员可以修改状态，组长和普通用户不能修改 */}
-          {isAdmin && (
-            <Form.Item
-              label="状态"
-              name="status"
-              rules={[{ required: true, message: '请选择状态' }]}
-            >
-              <Select>
-                <Select.Option value="在用">在用</Select.Option>
-                <Select.Option value="在库">在库</Select.Option>
-              </Select>
-            </Form.Item>
-          )}
-          <Form.Item
-            label="MAC地址"
-            name="mac_address"
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="IP地址"
-            name="ip_address"
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="存放办公地点"
-            name="office_location"
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="存放楼层"
-            name="floor"
-          >
-            <Input />
-          </Form.Item>
-          <Form.Item
-            label="座位号"
-            name="seat_number"
-          >
-            <Input placeholder="非必填" />
-          </Form.Item>
-          <Form.Item
-            label="使用人"
-            name="user_id"
-          >
-            <Select
-              allowClear
-              disabled={!isAdminOrLeader}
-              placeholder={isLeader ? "请选择本组人员" : "请选择使用人"}
-              // 前端搜索过滤
-              showSearch
-              filterOption={(input, option) => {
-                const user = users.find(u => u.id === option.value)
-                const searchStr = `${user?.real_name}${user?.ehr_number}`.toLowerCase()
-                return searchStr.includes(input.toLowerCase())
-              }}
-            >
-              {users
-                .filter(user => {
-                  // 组长只能给本组分配；管理员可以给所有人分配
-                  if (isLeader) {
-                    return user.group === currentUser?.group
-                  }
-                  return true
-                })
-                .map(user => (
-                  <Select.Option key={user.id} value={user.id}>
-                    {user.real_name} ({user.ehr_number}) - {user.group}
-                  </Select.Option>
-                ))}
-            </Select>
-          </Form.Item>
-          <Form.Item
-            label="备注说明"
-            name="remark"
-          >
-            <Input.TextArea rows={3} placeholder="非必填" />
-          </Form.Item>
+          {ASSET_FORM_FIELDS.map((field) => {
+            if (field.adminOnly && !isAdmin) return null
+            const rules = field.required ? [{ required: true, message: `请${field.label === '所属大类' ? '选择' : '输入'}${field.label}` }] : []
+            const label = field.label + (field.required ? '' : '')
+            if (field.type === 'select_category') {
+              return (
+                <Form.Item key={field.name} label={label} name={field.name} rules={rules}>
+                  <Select placeholder={`请选择${field.label}`}>
+                    {categories.map(cat => (
+                      <Select.Option key={cat.id} value={cat.id}>{cat.name}</Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              )
+            }
+            if (field.type === 'select' && field.options) {
+              return (
+                <Form.Item key={field.name} label={label} name={field.name} rules={rules}>
+                  <Select placeholder={`请选择${field.label}`}>
+                    {field.options.map(opt => (
+                      <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              )
+            }
+            if (field.type === 'select_user') {
+              const isUserId = field.name === 'user_id'
+              const disabled = isUserId && !isAdminOrLeader
+              const filteredUsers = isLeader
+                ? users.filter(u => u.group === currentUser?.group)
+                : users
+              return (
+                <Form.Item key={field.name} label={label} name={field.name}>
+                  <Select
+                    allowClear
+                    disabled={disabled}
+                    placeholder={isUserId && isLeader ? '请选择本组人员' : `请选择${field.label}`}
+                    showSearch
+                    filterOption={(input, option) => {
+                      const user = users.find(u => u.id === option.value)
+                      const searchStr = `${user?.real_name || ''}${user?.ehr_number || ''}`.toLowerCase()
+                      return searchStr.includes(input.toLowerCase())
+                    }}
+                  >
+                    {filteredUsers.map(user => (
+                      <Select.Option key={user.id} value={user.id}>
+                        {user.real_name} ({user.ehr_number}) - {user.group}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              )
+            }
+            if (field.type === 'textarea') {
+              return (
+                <Form.Item key={field.name} label={label} name={field.name}>
+                  <Input.TextArea rows={field.rows || 3} placeholder={field.placeholder} />
+                </Form.Item>
+              )
+            }
+            if (field.type === 'number') {
+              return (
+                <Form.Item key={field.name} label={label} name={field.name}>
+                  <InputNumber min={1} style={{ width: '100%' }} placeholder={field.placeholder} />
+                </Form.Item>
+              )
+            }
+            if (field.type === 'date') {
+              return (
+                <Form.Item key={field.name} label={label} name={field.name}>
+                  <DatePicker style={{ width: '100%' }} placeholder={`请选择${field.label}`} />
+                </Form.Item>
+              )
+            }
+            return (
+              <Form.Item key={field.name} label={label} name={field.name} rules={rules}>
+                <Input
+                  disabled={field.disabledWhenEdit && !!editingAsset}
+                  placeholder={field.placeholder}
+                />
+              </Form.Item>
+            )
+          })}
         </Form>
       </Modal>
 

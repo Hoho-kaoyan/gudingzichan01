@@ -77,7 +77,7 @@ const ApprovalManagement = () => {
 
   const fetchUsers = async () => {
     try {
-      const response = await api.get('/users/')
+      const response = await api.get('/users/', { params: { limit: 10000 } })
       setUsers(response.data)
     } catch (error) {
       console.error('获取用户列表失败:', error)

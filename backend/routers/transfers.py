@@ -10,7 +10,7 @@ from models import TransferRequest, Asset, User
 from schemas import TransferRequestCreate, TransferRequestResponse, TransferConfirmationRequest
 from auth import get_current_user
 from logger import logger
-from datetime import datetime
+from utils_time import now_east8
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -341,7 +341,7 @@ async def confirm_transfer_request(
     # 更新确认信息
     request.to_user_confirmed = 1 if confirmation_data.confirmed else 0
     request.to_user_confirm_comment = confirmation_data.comment
-    request.to_user_confirmed_at = datetime.utcnow()
+    request.to_user_confirmed_at = now_east8()
     
     if confirmation_data.confirmed:
         # 转入人确认，状态改为待审批

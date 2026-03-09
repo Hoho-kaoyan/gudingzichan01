@@ -6,6 +6,7 @@ from sqlalchemy import Column, Integer, String, ForeignKey, DateTime, Text, Bool
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from database import Base
+from utils_time import now_east8
 import enum
 import json
 
@@ -113,8 +114,8 @@ class Asset(Base):
     reserve_5 = Column(String(200), nullable=True, comment="预留5")
     reserve_6 = Column(String(200), nullable=True, comment="预留6")
     
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    created_at = Column(DateTime(timezone=True), default=now_east8)
+    updated_at = Column(DateTime(timezone=True), onupdate=now_east8)
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间（软删除）")
     deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="删除人ID")
     

@@ -2,7 +2,10 @@ import React, { useState, useEffect } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions, Tag } from 'antd'
 import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined, UserDeleteOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { useAuth } from '../contexts/AuthContext'
+
 const UserManagement = () => {
+  const { user: currentUser } = useAuth()
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
@@ -218,8 +221,9 @@ const UserManagement = () => {
       title: '操作',
       key: 'action',
       render: (_, record) => {
-        // 仓库用户（EHR号为1000000）不能删除
+        // 仓库用户（EHR号为1000000）不能删除；管理员不能删除自己
         const isWarehouse = record.ehr_number === '1000000'
+        const isSelf = record.id === currentUser?.id
         return (
           <Space>
             <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
@@ -235,7 +239,7 @@ const UserManagement = () => {
                 标记离职
               </Button>
             )}
-            {!isWarehouse && (
+            {!isWarehouse && !isSelf && (
               <Popconfirm
                 title="确定要删除吗？"
                 onConfirm={() => handleDelete(record.id)}

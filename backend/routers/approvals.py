@@ -14,7 +14,7 @@ from logger import logger
 def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
-from datetime import datetime
+from utils_time import now_east8
 
 router = APIRouter()
 
@@ -53,19 +53,23 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = datetime.utcnow()
+        request.approved_at = now_east8()
         
         # 如果批准，更新资产信息
         if approval_data.approved:
             # 查询资产，包括已删除的（因为审批时资产可能已被删除，但仍需要处理审批）
             asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
             if asset and asset.deleted_at is None:
+                to_user = db.query(User).filter(User.id == request.to_user_id).first()
+                if not to_user:
+                    raise HTTPException(status_code=404, detail="转入用户不存在")
+                if to_user.role == "admin":
+                    raise HTTPException(status_code=400, detail="使用人不能是管理员")
                 old_user_id = asset.user_id
                 old_user = db.query(User).filter(User.id == old_user_id).first() if old_user_id else None
                 
                 asset.user_id = request.to_user_id
                 # 更新使用人组别
-                to_user = db.query(User).filter(User.id == request.to_user_id).first()
                 if to_user:
                     asset.user_group = to_user.group
                 
@@ -145,7 +149,7 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = datetime.utcnow()
+        request.approved_at = now_east8()
         
         # 如果批准，根据申请人修改的内容更新资产信息
         if approval_data.approved:
@@ -191,6 +195,8 @@ async def approve_request(
                     # 状态变为"在库"，其他字段按照申请人修改的内容修改
                     new_user = db.query(User).filter(User.id == request.new_user_id).first()
                     if new_user:
+                        if new_user.role == "admin":
+                            raise HTTPException(status_code=400, detail="使用人不能是管理员")
                         asset.user_id = request.new_user_id
                         asset.user_group = new_user.group
                     else:
@@ -319,7 +325,7 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = datetime.utcnow()
+        request.approved_at = now_east8()
         
         # 如果批准，更新资产信息
         if approval_data.approved:
@@ -329,6 +335,11 @@ async def approve_request(
                 # 解析编辑数据
                 import json
                 edit_data = json.loads(request.edit_data) if request.edit_data else {}
+                # 使用人不能是管理员
+                if edit_data.get("user_id") is not None:
+                    edit_user = db.query(User).filter(User.id == edit_data["user_id"]).first()
+                    if edit_user and edit_user.role == "admin":
+                        raise HTTPException(status_code=400, detail="使用人不能是管理员")
                 
                 # 记录旧值
                 old_values = {

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge } from 'antd'
+import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge, Modal, Form, Input, message } from 'antd'
 import {
   DashboardOutlined,
   UserOutlined,
@@ -11,22 +11,53 @@ import {
   LogoutOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  LockOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
+import api from '../utils/api'
 
 const { Header, Sider, Content } = AntLayout
 
 const Layout = () => {
   const [collapsed, setCollapsed] = useState(false)
-  
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false)
+  const [passwordForm] = Form.useForm()
+  const [passwordSubmitting, setPasswordSubmitting] = useState(false)
+
   const setCollapse = (value) => {
     setCollapsed(value)
   }
   const navigate = useNavigate()
   const location = useLocation()
   const { user, logout, isAdmin } = useAuth()
+
+  const handlePasswordSubmit = async () => {
+    try {
+      const values = await passwordForm.validateFields()
+      if (values.new_password !== values.confirm_password) {
+        message.error('两次输入的新密码不一致')
+        return
+      }
+      setPasswordSubmitting(true)
+      await api.put('/users/me/password', {
+        old_password: values.old_password,
+        new_password: values.new_password
+      })
+      message.success('密码修改成功')
+      setPasswordModalVisible(false)
+      passwordForm.resetFields()
+    } catch (error) {
+      if (error.response?.status === 400 && error.response?.data?.detail === '原密码错误') {
+        message.error('原密码错误')
+      } else {
+        message.error(error.response?.data?.detail || '修改失败')
+      }
+    } finally {
+      setPasswordSubmitting(false)
+    }
+  }
   const { pendingTransferConfirmCount, pendingApprovalCount, pendingSafetyCheckCount } = useTransfer()
 
   const renderTransferLabel = () => {
@@ -141,6 +172,15 @@ const Layout = () => {
 
   const userMenuItems = [
     {
+      key: 'password',
+      icon: <LockOutlined />,
+      label: '修改密码',
+      onClick: () => {
+        passwordForm.resetFields()
+        setPasswordModalVisible(true)
+      }
+    },
+    {
       key: 'logout',
       icon: <LogoutOutlined />,
       label: '退出登录',
@@ -194,6 +234,27 @@ const Layout = () => {
           <Outlet />
         </Content>
       </AntLayout>
+
+      <Modal
+        title="修改密码"
+        open={passwordModalVisible}
+        onCancel={() => { setPasswordModalVisible(false); passwordForm.resetFields() }}
+        onOk={handlePasswordSubmit}
+        confirmLoading={passwordSubmitting}
+        destroyOnClose
+      >
+        <Form form={passwordForm} layout="vertical">
+          <Form.Item name="old_password" label="原密码" rules={[{ required: true, message: '请输入原密码' }]}>
+            <Input.Password placeholder="请输入原密码" />
+          </Form.Item>
+          <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '至少6位' }]}>
+            <Input.Password placeholder="请输入新密码（至少6位）" />
+          </Form.Item>
+          <Form.Item name="confirm_password" label="确认新密码" rules={[{ required: true, message: '请再次输入新密码' }]}>
+            <Input.Password placeholder="请再次输入新密码" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </AntLayout>
   )
 }

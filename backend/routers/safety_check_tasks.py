@@ -8,6 +8,7 @@ from sqlalchemy import func, and_, or_
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
+from utils_time import now_east8
 from models import (
     SafetyCheckTask, SafetyCheckType, TaskAsset, Asset, User
 )
@@ -23,7 +24,7 @@ router = APIRouter()
 
 def generate_task_number(db: Session) -> str:
     """生成任务编号：SAFETY-YYYY-NNN"""
-    year = datetime.now().year
+    year = now_east8().year
     # 查询今年已有的任务数量
     count = db.query(SafetyCheckTask).filter(
         SafetyCheckTask.task_number.like(f"SAFETY-{year}-%")
@@ -170,7 +171,7 @@ async def get_tasks(
                 if task.completed_at:
                     task_dict["completed_at"] = task.completed_at
                 else:
-                    task_dict["completed_at"] = datetime.now()
+                    task_dict["completed_at"] = now_east8()
         else:
             # 普通用户：显示自己的资产统计（排除已退库的）
             my_assets = db.query(TaskAsset).filter(
@@ -190,7 +191,7 @@ async def get_tasks(
         for task in tasks_to_update:
             task.status = "completed"
             if not task.completed_at:
-                task.completed_at = datetime.now()
+                task.completed_at = now_east8()
         db.commit()
     
     return {
@@ -249,7 +250,7 @@ async def get_task_detail(
         if total_assets > 0 and completed_assets == total_assets and task.status != "completed":
             task.status = "completed"
             if not task.completed_at:
-                task.completed_at = datetime.now()
+                task.completed_at = now_east8()
             db.commit()
             task_dict["status"] = "completed"
             task_dict["completed_at"] = task.completed_at
@@ -357,7 +358,7 @@ async def update_task(
     if task_data.status:
         task.status = task_data.status
         if task_data.status == "completed":
-            task.completed_at = datetime.now()
+            task.completed_at = now_east8()
     
     db.commit()
     db.refresh(task)

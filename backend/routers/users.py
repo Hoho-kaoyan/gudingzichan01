@@ -8,12 +8,12 @@ from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
 from models import User, Asset, SafetyCheckTask, TaskAsset, SafetyCheckAutoConfig, SafetyCheckAssetTypeMapping
-from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse
-from auth import get_current_user, get_current_admin_user, get_password_hash
+from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange
+from auth import get_current_user, get_current_admin_user, get_password_hash, verify_password
 import pandas as pd
 import io
-from datetime import datetime
 from excel_io import cell_to_str, row_to_error_dict
+from utils_time import now_east8
 
 router = APIRouter()
 
@@ -24,6 +24,20 @@ async def get_current_user_info(
 ):
     """获取当前登录用户信息"""
     return UserResponse.model_validate(current_user)
+
+
+@router.put("/me/password")
+async def change_my_password(
+    body: PasswordChange,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """当前用户修改自己的密码"""
+    if not verify_password(body.old_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="原密码错误")
+    current_user.password_hash = get_password_hash(body.new_password)
+    db.commit()
+    return {"message": "密码修改成功"}
 
 
 @router.get("/", response_model=List[UserResponse])
@@ -152,7 +166,7 @@ async def mark_user_resignation(
         for type_id, asset_ids in tasks_to_create.items():
             # 生成任务编号: SC-RESIGN-日期-用户ID-类型ID-随机数
             import random
-            ts_str = datetime.now().strftime('%Y%m%d%H%M%S')
+            ts_str = now_east8().strftime('%Y%m%d%H%M%S')
             task_number = f"SC-RESIGN-{ts_str}-{user_id}-{type_id}-{random.randint(100, 999)}"
             
             task = SafetyCheckTask(
@@ -253,9 +267,11 @@ async def delete_user(
     # 禁止删除"仓库"用户（EHR号为1000000）
     if user.ehr_number == "1000000":
         raise HTTPException(status_code=400, detail="不能删除仓库用户")
+    # 禁止管理员删除自己
+    if current_user.id == user_id:
+        raise HTTPException(status_code=400, detail="不能删除自己的账号")
     
-    from datetime import datetime, timezone
-    user.deleted_at = datetime.now(timezone.utc)
+    user.deleted_at = now_east8()
     user.deleted_by_id = current_user.id
     db.commit()
     return {"message": "用户已删除"}

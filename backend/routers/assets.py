@@ -8,21 +8,219 @@ from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
 from models import Asset, AssetCategory, User, TaskAsset
-from schemas import AssetCreate, AssetUpdate, AssetResponse, ImportResponse
-from auth import get_current_user
+from schemas import (
+    AssetCreate, AssetUpdate, AssetResponse, ImportResponse,
+    ImportConflictDetail, ImportConflictDiff, ImportResolveRequest,
+)
+from auth import get_current_user, get_current_admin_user
 import pandas as pd
 import io
 from fastapi.responses import StreamingResponse
-from excel_io import cell_to_str, row_cell_str, str_to_int, cell_to_date, row_to_error_dict
+from excel_io import cell_to_str, row_cell_str, str_to_int, str_to_date, cell_to_date, row_to_error_dict
 from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 from datetime import datetime
+from utils_time import now_east8
 from safety_check_linkage import create_system_allocated_task
 
 router = APIRouter()
+
+# 导入冲突比对：资产字段名 -> 中文标签（用于展示差异）
+ASSET_FIELD_LABELS = {
+    "category_id": "所属大类",
+    "name": "实物名称",
+    "specification": "规格型号",
+    "status": "状态",
+    "mac_address": "MAC地址",
+    "ip_address": "IP地址",
+    "office_location": "存放办公地点",
+    "floor": "存放楼层",
+    "seat_number": "座位号",
+    "user_id": "使用人",
+    "user_group": "使用人组别",
+    "remark": "备注说明",
+    "quantity": "件数",
+    "team": "所在团队",
+    "purchase_date": "购置日期",
+    "card_number": "卡片编号",
+    "safety_check_executor_id": "安全检查执行人",
+    "safety_check_executor_name": "安全检查执行人姓名",
+    "computer_type": "电脑类型",
+    "computer_usage": "电脑应用",
+    "computer_name": "计算机名",
+    "monitor1_model": "连接显示器1型号",
+    "monitor1_asset_number": "连接显示器1资产编号",
+    "monitor1_serial": "显示器1序列号",
+    "monitor2_model": "连接显示器2型号",
+    "monitor2_asset_number": "连接显示器2资产编号",
+    "monitor2_serial": "显示器2序列号",
+    "asset_contact": "资产管理联系人",
+    "reserve_1": "预留1", "reserve_2": "预留2", "reserve_3": "预留3",
+    "reserve_4": "预留4", "reserve_5": "预留5", "reserve_6": "预留6",
+}
+
+
+def _format_asset_value_for_diff(val, field: str, db: Session) -> str:
+    """将资产字段值格式化为可展示的字符串，用于冲突对比"""
+    if val is None:
+        return ""
+    if field == "category_id" and db is not None:
+        cat = db.query(AssetCategory).filter(AssetCategory.id == val).first()
+        return cat.name if cat else str(val)
+    if field == "user_id" and db is not None:
+        u = db.query(User).filter(User.id == val).first()
+        if u:
+            return f"{u.real_name}({u.ehr_number})"
+        return str(val)
+    if field == "safety_check_executor_id" and db is not None:
+        u = db.query(User).filter(User.id == val).first()
+        return u.real_name if u else str(val)
+    if hasattr(val, "isoformat"):  # date/datetime
+        return val.isoformat()[:10] if val else ""
+    return str(val).strip()
+
+
+def _build_import_conflict_diffs(existing_asset, parsed: dict, db: Session) -> List[ImportConflictDiff]:
+    """比较数据库中资产与解析后的导入数据，返回有差异的字段列表（用于展示）"""
+    diffs = []
+    for field, label in ASSET_FIELD_LABELS.items():
+        if field not in parsed:
+            continue
+        db_val = getattr(existing_asset, field, None)
+        imp_val = parsed[field]
+        # 统一比较：None 与 "" 视为同义，数字与字符串数字视为同义
+        def _norm(v):
+            if v is None:
+                return ""
+            if hasattr(v, "isoformat"):
+                return v.isoformat()[:10] if v else ""
+            s = str(v).strip()
+            return s if s else ""
+
+        db_str = _format_asset_value_for_diff(db_val, field, db)
+        imp_str = _format_asset_value_for_diff(imp_val, field, db) if imp_val is not None else ""
+        if _norm(db_val) != _norm(imp_val) or db_str != imp_str:
+            # 展示用：数据库值、导入值
+            d_str = db_str if db_str else "(空)"
+            i_str = imp_str if imp_str else "(空)"
+            if d_str != i_str:
+                diffs.append(ImportConflictDiff(field_label=label, db_value=d_str, import_value=i_str))
+    return diffs
+
+
+def _get_rd(row_data: dict, *keys: str) -> str:
+    """从 row_data（中文列名）取第一个存在的键的值，strip 后返回"""
+    for k in keys:
+        v = row_data.get(k)
+        if v is not None:
+            s = (str(v).strip() if not hasattr(v, "strip") else v.strip()) if v else ""
+            if s and str(s).lower() != "nan":
+                return s
+    return ""
+
+
+def _parse_row_data_for_resolve(row_data: dict, db: Session):
+    """
+    将冲突详情中的 row_data（中文列名、字符串值）解析为与导入逻辑一致的字段字典，
+    用于「覆盖」时更新资产。返回 (parsed_dict, category)；
+    若大类或必填为空则抛出 ValueError。
+    """
+    category_name = _get_rd(row_data, "所属大类")
+    name = _get_rd(row_data, "实物名称")
+    if not category_name or not name:
+        raise ValueError("所属大类、实物名称为必填")
+    category = db.query(AssetCategory).filter(AssetCategory.name == category_name).first()
+    if not category:
+        category = AssetCategory(name=category_name)
+        db.add(category)
+        db.flush()
+    specification = _get_rd(row_data, "规格型号") or None
+    status = _get_rd(row_data, "实物状态", "状态") or "在用"
+    if status == "库存备用":
+        status = "在库"
+    mac_address = _get_rd(row_data, "终端mac地址", "MAC地址") or None
+    ip_address = _get_rd(row_data, "终端IP号", "IP地址") or None
+    office_location = _get_rd(row_data, "存放办公地点") or None
+    floor = _get_rd(row_data, "具体存放楼层", "存放楼层") or None
+    seat_number = _get_rd(row_data, "座位号") or None
+    user_group = _get_rd(row_data, "使用人组别", "组別", "组别") or None
+    remark = _get_rd(row_data, "备注说明") or None
+    quantity = str_to_int(_get_rd(row_data, "件数"), default=1)
+    if quantity is None or quantity < 1:
+        quantity = 1
+    team = _get_rd(row_data, "所在团队") or None
+    purchase_date = str_to_date(_get_rd(row_data, "购置日期")) if _get_rd(row_data, "购置日期") else None
+    card_number = _get_rd(row_data, "卡片编号") or None
+    computer_type = _get_rd(row_data, "电脑类型") or None
+    computer_usage = _get_rd(row_data, "电脑应用") or None
+    computer_name = _get_rd(row_data, "计算机名") or None
+    monitor1_model = _get_rd(row_data, "连接显示器1型号") or None
+    monitor1_asset_number = _get_rd(row_data, "连接显示器1资产编号") or None
+    monitor1_serial = _get_rd(row_data, "显示器1 序列号", "显示器1序列号") or None
+    monitor2_model = _get_rd(row_data, "连接显示器2", "连接显示器2型号") or None
+    monitor2_asset_number = _get_rd(row_data, "连接显示器2资产编号") or None
+    monitor2_serial = _get_rd(row_data, "显示器2序列号") or None
+    asset_contact = _get_rd(row_data, "资产管理联系人") or None
+    reserve_1 = _get_rd(row_data, "预留1") or None
+    reserve_2 = _get_rd(row_data, "预留2") or None
+    reserve_3 = _get_rd(row_data, "预留3") or None
+    reserve_4 = _get_rd(row_data, "预留4") or None
+    reserve_5 = _get_rd(row_data, "预留5") or None
+    reserve_6 = _get_rd(row_data, "预留6") or None
+    safety_check_executor_id = str_to_int(_get_rd(row_data, "安全检查执行人ID"), default=None)
+    safety_check_executor_name = _get_rd(row_data, "安全检查执行人") or None
+    if safety_check_executor_id is None and safety_check_executor_name:
+        u = db.query(User).filter(
+            User.real_name == safety_check_executor_name.strip(),
+            User.deleted_at.is_(None)
+        ).first()
+        if u:
+            safety_check_executor_id = u.id
+    user_id = str_to_int(_get_rd(row_data, "所有人ID"), default=None)
+    if user_id is not None:
+        u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+        if not u:
+            user_id = None
+        elif not user_group:
+            user_group = u.group
+    if user_id is None:
+        owner_name = _get_rd(row_data, "所有人")
+        if owner_name:
+            u = db.query(User).filter(
+                User.real_name == owner_name.strip(),
+                User.deleted_at.is_(None)
+            ).first()
+            if u:
+                user_id = u.id
+                if not user_group:
+                    user_group = u.group
+    if user_id is None:
+        user_ehr = _get_rd(row_data, "使用人EHR号")
+        if user_ehr:
+            user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
+            if user:
+                user_id = user.id
+                if not user_group:
+                    user_group = user.group
+    parsed = {
+        "category_id": category.id, "name": name, "specification": specification,
+        "status": status, "mac_address": mac_address, "ip_address": ip_address,
+        "office_location": office_location, "floor": floor, "seat_number": seat_number,
+        "user_id": user_id, "user_group": user_group, "remark": remark,
+        "quantity": quantity, "team": team, "purchase_date": purchase_date,
+        "card_number": card_number, "safety_check_executor_id": safety_check_executor_id,
+        "safety_check_executor_name": safety_check_executor_name,
+        "computer_type": computer_type, "computer_usage": computer_usage, "computer_name": computer_name,
+        "monitor1_model": monitor1_model, "monitor1_asset_number": monitor1_asset_number, "monitor1_serial": monitor1_serial,
+        "monitor2_model": monitor2_model, "monitor2_asset_number": monitor2_asset_number, "monitor2_serial": monitor2_serial,
+        "asset_contact": asset_contact,
+        "reserve_1": reserve_1, "reserve_2": reserve_2, "reserve_3": reserve_3,
+        "reserve_4": reserve_4, "reserve_5": reserve_5, "reserve_6": reserve_6,
+    }
+    return parsed, category
 
 
 @router.get("/", response_model=List[AssetResponse])
@@ -181,9 +379,9 @@ async def get_asset(
 async def create_asset(
     asset_data: AssetCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_admin_user)
 ):
-    """创建新资产"""
+    """创建新资产（仅管理员）"""
     # 检查资产编号是否已存在（包括已删除的资产，因为资产编号应该唯一）
     existing = db.query(Asset).filter(
         Asset.asset_number == asset_data.asset_number,
@@ -222,12 +420,14 @@ async def create_asset(
                 del asset_dict["status"]
             asset_dict["status"] = "在用"
     else:
-        # 管理员创建时，如指定了使用人则检查
+        # 管理员创建时，如指定了使用人则检查（使用人不能是管理员）
         user_id = asset_dict.get("user_id")
         if user_id:
             user = db.query(User).filter(User.id == user_id).first()
             if not user:
                 raise HTTPException(status_code=404, detail="使用人不存在")
+            if user.role == "admin":
+                raise HTTPException(status_code=400, detail="使用人不能是管理员")
             if not asset_dict.get("user_group"):
                 asset_dict["user_group"] = user.group
 
@@ -418,6 +618,12 @@ async def update_asset(
     # 更新字段
     update_data = asset_data.dict(exclude_unset=True)
     
+    # 使用人不能是管理员
+    if "user_id" in update_data and update_data["user_id"] is not None:
+        new_usr = db.query(User).filter(User.id == update_data["user_id"]).first()
+        if new_usr and new_usr.role == "admin":
+            raise HTTPException(status_code=400, detail="使用人不能是管理员")
+    
     # 【改动：延迟调拨生效拦截】
     is_reallocation = False
     new_user_id = asset_data.user_id
@@ -533,7 +739,7 @@ async def delete_asset(
         raise HTTPException(status_code=400, detail="资产已被删除")
     
     # 软删除：设置删除时间和删除人
-    asset.deleted_at = datetime.utcnow()
+    asset.deleted_at = now_east8()
     asset.deleted_by_id = current_user.id
     
     logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 删除资产: {asset.asset_number} - {asset.name}")
@@ -598,6 +804,8 @@ async def import_assets(
         skip_count = 0
         errors = []
         error_details = []
+        conflict_count = 0
+        conflict_details: List[ImportConflictDetail] = []
         
         for index, row in df.iterrows():
             row_number = index + 2  # Excel行号（从2开始，第1行是表头）
@@ -608,13 +816,16 @@ async def import_assets(
                 asset_number = cell_to_str(row.get('资产编号', ''))
                 category_name = cell_to_str(row.get('所属大类', ''))
                 name = cell_to_str(row.get('实物名称', ''))
-                
-                # 按资产编号查库（含已逻辑删除），用于判断：未删除则跳过，已删除则恢复+更新
-                existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
-                if existing_any and existing_any.deleted_at is None:
-                    # 已存在且未删除：静默跳过
-                    skip_count += 1
+                # 行级必填校验（参考用户批量导入）
+                if not (asset_number and str(asset_number).strip()) or not (category_name and str(category_name).strip()) or not (name and str(name).strip()):
+                    error_count += 1
+                    error_msg = "资产编号、所属大类、实物名称为必填"
+                    errors.append(f"第{row_number}行：{error_msg}")
+                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                     continue
+                
+                # 按资产编号查库（含已逻辑删除），用于判断：未删除则比对冲突/跳过，已删除则恢复+更新
+                existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
                 
                 # 查找或创建资产大类
                 category = db.query(AssetCategory).filter(AssetCategory.name == category_name).first()
@@ -624,10 +835,15 @@ async def import_assets(
                     db.flush()
                 
                 specification = row_cell_str(row, df.columns, '规格型号') or None
-                # 状态：优先读「实物状态」，若无则读「状态」（与《资产导入字段扩展方案》一致）
-                status = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
-                if status == '库存备用':
-                    status = '在库'
+                # 状态：优先读「实物状态」，若无则读「状态」；只允许在用/在库/库存备用
+                status_raw = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
+                if status_raw not in ('在用', '在库', '库存备用'):
+                    error_count += 1
+                    error_msg = f"状态必须是：在用、在库、库存备用，当前为「{status_raw}」"
+                    errors.append(f"第{row_number}行：{error_msg}")
+                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
+                    continue
+                status = '在库' if status_raw == '库存备用' else status_raw
                 mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
                 ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
                 office_location = row_cell_str(row, df.columns, '存放办公地点') or None
@@ -694,6 +910,15 @@ async def import_assets(
                             errors.append(f"第{row_number}行：{error_msg}")
                             error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                             continue
+                # 使用人不能是管理员
+                if user_id is not None:
+                    custodian = db.query(User).filter(User.id == user_id).first()
+                    if custodian and custodian.role == "admin":
+                        error_count += 1
+                        error_msg = "使用人不能是管理员"
+                        errors.append(f"第{row_number}行：{error_msg}")
+                        error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
+                        continue
                 if user_id is None:
                     user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
                     if user_ehr:
@@ -710,6 +935,37 @@ async def import_assets(
                             continue
                 
                 assigned_id = safety_check_executor_id or user_id
+                
+                # 已存在且未删除：比对差异，有差异则加入冲突列表供用户选择覆盖/保持
+                if existing_any and existing_any.deleted_at is None:
+                    parsed = {
+                        "category_id": category.id, "name": name, "specification": specification,
+                        "status": status, "mac_address": mac_address, "ip_address": ip_address,
+                        "office_location": office_location, "floor": floor, "seat_number": seat_number,
+                        "user_id": user_id, "user_group": user_group, "remark": remark,
+                        "quantity": quantity, "team": team, "purchase_date": purchase_date,
+                        "card_number": card_number, "safety_check_executor_id": safety_check_executor_id,
+                        "safety_check_executor_name": safety_check_executor_name,
+                        "computer_type": computer_type, "computer_usage": computer_usage, "computer_name": computer_name,
+                        "monitor1_model": monitor1_model, "monitor1_asset_number": monitor1_asset_number, "monitor1_serial": monitor1_serial,
+                        "monitor2_model": monitor2_model, "monitor2_asset_number": monitor2_asset_number, "monitor2_serial": monitor2_serial,
+                        "asset_contact": asset_contact,
+                        "reserve_1": reserve_1, "reserve_2": reserve_2, "reserve_3": reserve_3,
+                        "reserve_4": reserve_4, "reserve_5": reserve_5, "reserve_6": reserve_6,
+                    }
+                    diffs = _build_import_conflict_diffs(existing_any, parsed, db)
+                    if not diffs:
+                        skip_count += 1
+                        continue
+                    conflict_count += 1
+                    conflict_details.append(ImportConflictDetail(
+                        row_number=row_number,
+                        asset_number=asset_number,
+                        asset_id=existing_any.id,
+                        diffs=diffs,
+                        row_data=row_to_error_dict(row_data),
+                    ))
+                    continue
                 
                 if existing_any and existing_any.deleted_at is not None:
                     # 存在且已逻辑删除：恢复并更新该行，不插入
@@ -818,18 +1074,130 @@ async def import_assets(
         
         db.commit()
         
-        # 限制返回的错误数量
+        # 限制返回的错误与冲突数量
         max_errors = 100
+        max_conflicts = 100
         limited_errors = errors[:max_errors]
         limited_error_details = error_details[:max_errors]
+        limited_conflict_details = conflict_details[:max_conflicts]
         
         return ImportResponse(
             success_count=success_count,
             error_count=error_count,
             skip_count=skip_count,
             errors=limited_errors,
-            error_details=limited_error_details
+            error_details=limited_error_details,
+            conflict_count=conflict_count,
+            conflict_details=limited_conflict_details,
         )
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"导入失败：{str(e)}")
+
+
+@router.post("/import-resolve")
+async def resolve_import_conflicts(
+    body: ImportResolveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    解决导入冲突：用户选择「覆盖」则用导入数据更新资产，选择「保持」则不修改。
+    仅管理员可调用。
+    """
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="只有管理员可以处理导入冲突")
+    overwrite_count = 0
+    errors_resolve = []
+    for d in body.decisions:
+        asset = db.query(Asset).filter(Asset.id == d.asset_id, Asset.deleted_at.is_(None)).first()
+        if not asset:
+            errors_resolve.append(f"资产ID {d.asset_id} 不存在或已删除，已跳过")
+            continue
+        if d.action == "keep":
+            continue
+        if d.action != "overwrite" or not d.row_data:
+            errors_resolve.append(f"资产 {asset.asset_number}：覆盖操作需要提供 row_data")
+            continue
+        try:
+            parsed, _ = _parse_row_data_for_resolve(d.row_data, db)
+        except Exception as e:
+            errors_resolve.append(f"资产 {asset.asset_number} 解析 row_data 失败：{str(e)}")
+            continue
+        # 使用人不能是管理员
+        if parsed.get("user_id") is not None:
+            custodian = db.query(User).filter(User.id == parsed["user_id"]).first()
+            if custodian and custodian.role == "admin":
+                errors_resolve.append(f"资产 {asset.asset_number}：使用人不能是管理员，已跳过覆盖")
+                continue
+        # 覆盖前保存旧值，用于流转记录与编辑历史
+        old_user_id = asset.user_id
+        old_name = asset.name
+        old_status = asset.status
+        old_user = db.query(User).filter(User.id == old_user_id).first() if old_user_id else None
+        asset.category_id = parsed["category_id"]
+        asset.name = parsed["name"]
+        asset.specification = parsed["specification"]
+        asset.status = parsed["status"]
+        asset.mac_address = parsed["mac_address"]
+        asset.ip_address = parsed["ip_address"]
+        asset.office_location = parsed["office_location"]
+        asset.floor = parsed["floor"]
+        asset.seat_number = parsed["seat_number"]
+        asset.user_id = parsed["user_id"]
+        asset.user_group = parsed["user_group"]
+        asset.remark = parsed["remark"]
+        asset.quantity = parsed["quantity"]
+        asset.team = parsed["team"]
+        asset.purchase_date = parsed["purchase_date"]
+        asset.card_number = parsed["card_number"]
+        asset.safety_check_executor_id = parsed["safety_check_executor_id"]
+        asset.safety_check_executor_name = parsed["safety_check_executor_name"]
+        asset.computer_type = parsed["computer_type"]
+        asset.computer_usage = parsed["computer_usage"]
+        asset.computer_name = parsed["computer_name"]
+        asset.monitor1_model = parsed["monitor1_model"]
+        asset.monitor1_asset_number = parsed["monitor1_asset_number"]
+        asset.monitor1_serial = parsed["monitor1_serial"]
+        asset.monitor2_model = parsed["monitor2_model"]
+        asset.monitor2_asset_number = parsed["monitor2_asset_number"]
+        asset.monitor2_serial = parsed["monitor2_serial"]
+        asset.asset_contact = parsed["asset_contact"]
+        asset.reserve_1 = parsed["reserve_1"]
+        asset.reserve_2 = parsed["reserve_2"]
+        asset.reserve_3 = parsed["reserve_3"]
+        asset.reserve_4 = parsed["reserve_4"]
+        asset.reserve_5 = parsed["reserve_5"]
+        asset.reserve_6 = parsed["reserve_6"]
+        overwrite_count += 1
+        try:
+            create_history = get_create_history_record()
+            create_history(
+                db=db,
+                asset_id=asset.id,
+                action_type="edit",
+                action_description=f"导入冲突解决：用户选择覆盖，更新资产 {asset.asset_number}",
+                operator_id=current_user.id,
+                old_value={"name": old_name, "status": old_status, "user_id": old_user_id},
+                new_value={"name": asset.name, "status": asset.status, "user_id": asset.user_id},
+            )
+            # 使用人变动时新增一条流转记录
+            if old_user_id != parsed["user_id"]:
+                new_user = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
+                create_history(
+                    db=db,
+                    asset_id=asset.id,
+                    action_type="transfer",
+                    action_description=f"导入覆盖导致使用人变更：资产 {asset.asset_number}",
+                    operator_id=current_user.id,
+                    old_value={"user_id": old_user_id, "user_name": old_user.real_name if old_user else ""},
+                    new_value={"user_id": asset.user_id, "user_name": new_user.real_name if new_user else ""},
+                )
+        except Exception as e:
+            logger.error(f"记录导入覆盖历史失败: {e}", exc_info=True)
+    db.commit()
+    return {
+        "message": f"已处理 {len(body.decisions)} 条，其中覆盖 {overwrite_count} 条",
+        "overwrite_count": overwrite_count,
+        "errors": errors_resolve,
+    }

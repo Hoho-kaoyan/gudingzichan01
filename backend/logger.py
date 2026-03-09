@@ -3,8 +3,8 @@
 """
 import logging
 import os
-from datetime import datetime
 from logging.handlers import RotatingFileHandler
+from utils_time import now_east8
 
 # 创建logs目录
 log_dir = os.path.join(os.path.dirname(__file__), 'logs')
@@ -24,7 +24,7 @@ logger.setLevel(logging.INFO)
 # 避免重复添加handler
 if not logger.handlers:
     # 文件handler - 按日期和大小轮转
-    log_file = os.path.join(log_dir, f'asset_management_{datetime.now().strftime("%Y%m%d")}.log')
+    log_file = os.path.join(log_dir, f'asset_management_{now_east8().strftime("%Y%m%d")}.log')
     file_handler = RotatingFileHandler(
         log_file,
         maxBytes=10 * 1024 * 1024,  # 10MB

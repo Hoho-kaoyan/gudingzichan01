@@ -38,13 +38,8 @@ const ASSET_FORM_FIELDS = [
   { name: 'monitor2_model', label: '连接显示器2型号', type: 'input' },
   { name: 'monitor2_asset_number', label: '连接显示器2资产编号', type: 'input' },
   { name: 'monitor2_serial', label: '显示器2序列号', type: 'input' },
-  { name: 'asset_contact', label: '资产管理联系人', type: 'input' },
-  { name: 'reserve_1', label: '预留1', type: 'input' },
-  { name: 'reserve_2', label: '预留2', type: 'input' },
-  { name: 'reserve_3', label: '预留3', type: 'input' },
-  { name: 'reserve_4', label: '预留4', type: 'input' },
-  { name: 'reserve_5', label: '预留5', type: 'input' },
-  { name: 'reserve_6', label: '预留6', type: 'input' }
+  { name: 'asset_contact', label: '资产管理联系人', type: 'input' }
+  // 预留1～6 仅用于导入/后端，不在查看与新建/编辑中展示
 ]
 
 const AssetManagement = () => {
@@ -66,6 +61,8 @@ const AssetManagement = () => {
   const [currentEditRequest, setCurrentEditRequest] = useState(null)
   const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
   const [importErrors, setImportErrors] = useState([])
+  const [importConflictModalVisible, setImportConflictModalVisible] = useState(false)
+  const [importConflicts, setImportConflicts] = useState([])
   const [assetDetailModalVisible, setAssetDetailModalVisible] = useState(false)
   const [currentAssetDetail, setCurrentAssetDetail] = useState(null)
 
@@ -291,19 +288,37 @@ const AssetManagement = () => {
       const response = await api.post('/assets/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      const { success_count, error_count, errors, error_details } = response.data
+      const {
+        success_count,
+        error_count,
+        skip_count,
+        errors,
+        error_details,
+        conflict_count,
+        conflict_details
+      } = response.data
 
       if (error_count > 0) {
-        // 如果有错误，显示错误详情模态框
         setImportErrors(error_details || errors.map((err, idx) => ({
           row_number: idx + 1,
           error_message: err,
           row_data: {}
         })))
         setImportErrorModalVisible(true)
-        message.warning(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条，请查看失败详情`)
+      }
+      if (conflict_count > 0) {
+        setImportConflicts(conflict_details || [])
+        setImportConflictModalVisible(true)
+      }
+
+      const parts = [`成功 ${success_count} 条`]
+      if (skip_count > 0) parts.push(`已存在且一致跳过 ${skip_count} 条`)
+      if (error_count > 0) parts.push(`失败 ${error_count} 条，请查看失败详情`)
+      if (conflict_count > 0) parts.push(`${conflict_count} 条与数据库有差异，请选择覆盖或保持`)
+      if (error_count > 0 || conflict_count > 0) {
+        message.warning(`导入完成：${parts.join('；')}`)
       } else {
-        message.success(`导入完成：成功 ${success_count} 条`)
+        message.success(`导入完成：${parts.join('；')}`)
       }
       fetchAssets()
       fetchCategories()
@@ -311,6 +326,30 @@ const AssetManagement = () => {
       message.error(error.response?.data?.detail || '导入失败')
     }
     return false
+  }
+
+  const handleResolveConflict = async (item, action) => {
+    const payload = {
+      decisions: [{
+        asset_id: item.asset_id,
+        action,
+        row_data: action === 'overwrite' ? item.row_data : undefined
+      }]
+    }
+    try {
+      await api.post('/assets/import-resolve', payload)
+      setImportConflicts((prev) => {
+        const next = prev.filter((c) => c.asset_id !== item.asset_id)
+        if (next.length === 0) setImportConflictModalVisible(false)
+        return next
+      })
+      if (action === 'overwrite') {
+        message.success(`已用导入数据覆盖资产 ${item.asset_number}`)
+        fetchAssets()
+      }
+    } catch (err) {
+      message.error(err.response?.data?.detail || '操作失败')
+    }
   }
 
   const handleExport = async () => {
@@ -616,9 +655,11 @@ const AssetManagement = () => {
               <Button icon={<UploadOutlined />}>批量导入</Button>
             </Upload>
           )}
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
-            新增资产
-          </Button>
+          {isAdmin && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
+              新增资产
+            </Button>
+          )}
           {isAdmin && (
             <Button
               icon={<DownloadOutlined />}
@@ -810,45 +851,31 @@ const AssetManagement = () => {
       >
         {currentAssetDetail && (
           <Descriptions bordered column={2} size="small">
-            <Descriptions.Item label="资产编号" span={2}>
-              {currentAssetDetail.asset_number || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="所属大类" span={2}>
-              {currentAssetDetail.category?.name || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="实物名称" span={2}>
-              {currentAssetDetail.name || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="规格型号">
-              {currentAssetDetail.specification || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="状态">
-              {(currentAssetDetail.status === '库存备用' || currentAssetDetail.status === '在库') ? '在库' : (currentAssetDetail.status || '-')}
-            </Descriptions.Item>
-            <Descriptions.Item label="MAC地址">
-              {currentAssetDetail.mac_address || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="IP地址">
-              {currentAssetDetail.ip_address || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="使用人">
-              {currentAssetDetail.user?.real_name ? `${currentAssetDetail.user.real_name} (${currentAssetDetail.user.ehr_number})` : '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="组别">
-              {currentAssetDetail.user_group || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="存放地点">
-              {currentAssetDetail.office_location || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="存放楼层">
-              {currentAssetDetail.floor || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="座位号">
-              {currentAssetDetail.seat_number || '-'}
-            </Descriptions.Item>
-            <Descriptions.Item label="备注说明" span={2}>
-              {currentAssetDetail.remark || '-'}
-            </Descriptions.Item>
+            {ASSET_FORM_FIELDS.map((field) => {
+              let value = currentAssetDetail[field.name]
+              if (field.type === 'select_category') {
+                value = currentAssetDetail.category?.name
+              } else if (field.name === 'user_id') {
+                value = currentAssetDetail.user?.real_name
+                  ? `${currentAssetDetail.user.real_name} (${currentAssetDetail.user.ehr_number})`
+                  : null
+              } else if (field.name === 'safety_check_executor_id') {
+                const exec = currentAssetDetail.safety_check_executor
+                value = exec?.real_name
+                  ? `${exec.real_name} (${exec.ehr_number})`
+                  : (currentAssetDetail.safety_check_executor_name || null)
+              } else if (field.type === 'date' && value) {
+                value = dayjs(value).format('YYYY-MM-DD')
+              } else if (field.name === 'status') {
+                value = (value === '库存备用' || value === '在库') ? '在库' : value
+              }
+              const display = value !== undefined && value !== null && value !== '' ? String(value) : '-'
+              return (
+                <Descriptions.Item key={field.name} label={field.label} span={field.type === 'textarea' ? 2 : 1}>
+                  {display}
+                </Descriptions.Item>
+              )
+            })}
             <Descriptions.Item label="创建时间">
               {currentAssetDetail.created_at ? dayjs(currentAssetDetail.created_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
             </Descriptions.Item>
@@ -1089,6 +1116,82 @@ const AssetManagement = () => {
             rowExpandable: (record) => record.row_data && Object.keys(record.row_data).length > 0
           }}
         />
+      </Modal>
+
+      {/* 导入冲突：与数据库有差异，用户选择覆盖或保持 */}
+      <Modal
+        title="导入冲突：请选择覆盖或保持"
+        open={importConflictModalVisible}
+        onCancel={() => {
+          setImportConflictModalVisible(false)
+          setImportConflicts([])
+        }}
+        footer={[
+          <Button
+            key="close"
+            onClick={() => {
+              setImportConflictModalVisible(false)
+              setImportConflicts([])
+            }}
+          >
+            关闭
+          </Button>
+        ]}
+        width={800}
+      >
+        <Alert
+          message="以下资产在数据库中已存在，且部分字段与导入数据不一致。请逐条选择「覆盖」用导入数据更新，或「保持」保留数据库原值。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <div style={{ maxHeight: 480, overflow: 'auto' }}>
+          {importConflicts.map((item) => (
+            <div
+              key={item.asset_id}
+              style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: '#fafafa'
+              }}
+            >
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                第 {item.row_number} 行 · 资产编号：{item.asset_number}
+              </div>
+              <Table
+                dataSource={item.diffs || []}
+                rowKey={(r) => r.field_label}
+                size="small"
+                pagination={false}
+                columns={[
+                  { title: '字段', dataIndex: 'field_label', key: 'field_label', width: 140 },
+                  {
+                    title: '数据库中当前值',
+                    dataIndex: 'db_value',
+                    key: 'db_value',
+                    render: (t) => <span style={{ color: '#1890ff' }}>{t}</span>
+                  },
+                  {
+                    title: '导入文件中的值',
+                    dataIndex: 'import_value',
+                    key: 'import_value',
+                    render: (t) => <span style={{ color: '#52c41a' }}>{t}</span>
+                  }
+                ]}
+              />
+              <Space style={{ marginTop: 8 }}>
+                <Button type="primary" size="small" onClick={() => handleResolveConflict(item, 'overwrite')}>
+                  覆盖（用导入数据更新）
+                </Button>
+                <Button size="small" onClick={() => handleResolveConflict(item, 'keep')}>
+                  保持（不改动数据库）
+                </Button>
+              </Space>
+            </div>
+          ))}
+        </div>
       </Modal>
     </div>
   )

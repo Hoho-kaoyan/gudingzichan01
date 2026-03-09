@@ -56,7 +56,7 @@ def create_system_allocated_task(db: Session, asset_id: int, assigned_user_id: i
     如果解析不到匹配的安全检查类型方案，则跳过创建并记录日志。
     """
     from models import Asset, SafetyCheckTask, TaskAsset
-    from datetime import datetime, timezone
+    from utils_time import now_east8
 
     # 1) 获取资产存在性及查名字
     asset = db.query(Asset).filter(Asset.id == asset_id, Asset.deleted_at == None).first()
@@ -72,7 +72,7 @@ def create_system_allocated_task(db: Session, asset_id: int, assigned_user_id: i
 
     # 3) 准备创建主任务 `safety_check_tasks`
     # 生成随机特征的任务编号（格式范例：TASK-LINKAGE-时间戳毫秒）
-    timestamp_str = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S%f")[:17]
+    timestamp_str = now_east8().strftime("%Y%m%d%H%M%S%f")[:17]
     task_number = f"TASK-LINKAGE-{timestamp_str}"
     
     # 构建 title（默认自带前缀和来源提醒，便于人员分辨）

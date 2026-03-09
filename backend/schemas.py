@@ -3,7 +3,7 @@ Pydantic模式定义
 用于API请求和响应的数据验证
 """
 from pydantic import BaseModel, Field, validator, field_validator
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, date
 from enum import Enum
 import json
@@ -34,6 +34,12 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     status: Optional[str] = None
     password: Optional[str] = None
+
+
+class PasswordChange(BaseModel):
+    """当前用户修改自己的密码"""
+    old_password: str = Field(..., description="原密码")
+    new_password: str = Field(..., min_length=6, description="新密码")
 
 
 class UserResponse(UserBase):
@@ -275,12 +281,42 @@ class ImportErrorDetail(BaseModel):
     error_message: str = Field(..., description="错误信息")
     row_data: dict = Field(default_factory=dict, description="该行的原始数据")
 
+
+class ImportConflictDiff(BaseModel):
+    """导入冲突：单个字段的数据库值与导入值差异"""
+    field_label: str = Field(..., description="字段中文名")
+    db_value: str = Field(..., description="数据库中当前值（展示用）")
+    import_value: str = Field(..., description="导入文件中的值（展示用）")
+
+
+class ImportConflictDetail(BaseModel):
+    """导入冲突详情：资产已存在且部分字段与导入数据不一致"""
+    row_number: int = Field(..., description="Excel 行号")
+    asset_number: str = Field(..., description="资产编号")
+    asset_id: int = Field(..., description="资产ID，用于解决冲突时指定")
+    diffs: List[ImportConflictDiff] = Field(default_factory=list, description="不一致的字段列表")
+    row_data: dict = Field(default_factory=dict, description="该行原始数据，解决覆盖时需回传")
+
+
 class ImportResponse(BaseModel):
     success_count: int
     error_count: int
-    skip_count: int = Field(default=0, description="静默跳过的重复行数")
+    skip_count: int = Field(default=0, description="静默跳过的重复行数（已存在且完全一致）")
     errors: List[str] = []  # 保持向后兼容
-    error_details: List[ImportErrorDetail] = Field(default_factory=list, description="详细的错误信息")
+    error_details: List[ImportErrorDetail] = Field(default_factory=list, description="详细的失败原因")
+    conflict_count: int = Field(default=0, description="与数据库存在差异的条数（待用户选择覆盖或保持）")
+    conflict_details: List[ImportConflictDetail] = Field(default_factory=list, description="冲突详情，含差异字段与行数据")
+
+
+# 导入冲突解决请求
+class ImportResolveDecision(BaseModel):
+    asset_id: int = Field(..., description="资产ID")
+    action: Literal["overwrite", "keep"] = Field(..., description="overwrite=用导入数据覆盖，keep=保持数据库不变")
+    row_data: Optional[dict] = Field(None, description="覆盖时必传，与 conflict_details 中该条的 row_data 一致")
+
+
+class ImportResolveRequest(BaseModel):
+    decisions: List[ImportResolveDecision] = Field(..., description="每条冲突的选择")
 
 
 # 资产编辑申请模式

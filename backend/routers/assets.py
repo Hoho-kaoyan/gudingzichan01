@@ -46,8 +46,8 @@ ASSET_FIELD_LABELS = {
     "team": "所在团队",
     "purchase_date": "购置日期",
     "card_number": "卡片编号",
-    "safety_check_executor_id": "安全检查执行人",
-    "safety_check_executor_name": "安全检查执行人姓名",
+    "safety_check_executor_id": "检查执行人",
+    "safety_check_executor_name": "检查执行人姓名",
     "computer_type": "电脑类型",
     "computer_usage": "电脑应用",
     "computer_name": "计算机名",
@@ -170,8 +170,8 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
     reserve_4 = _get_rd(row_data, "预留4") or None
     reserve_5 = _get_rd(row_data, "预留5") or None
     reserve_6 = _get_rd(row_data, "预留6") or None
-    safety_check_executor_id = str_to_int(_get_rd(row_data, "安全检查执行人ID"), default=None)
-    safety_check_executor_name = _get_rd(row_data, "安全检查执行人") or None
+    safety_check_executor_id = str_to_int(_get_rd(row_data, "检查执行人ID"), default=None)
+    safety_check_executor_name = _get_rd(row_data, "检查执行人") or None
     if safety_check_executor_id is None and safety_check_executor_name:
         u = db.query(User).filter(
             User.real_name == safety_check_executor_name.strip(),
@@ -460,7 +460,7 @@ async def create_asset(
     db.commit()
     db.refresh(db_asset)
     
-    # 【新增逻辑】：如果资产落库后有使用人或安全检查执行人，下发安检联动任务（优先使用安全检查执行人ID）
+    # 【新增逻辑】：如果资产落库后有使用人或检查执行人，下发安检联动任务（优先使用检查执行人ID）
     assigned_id = getattr(db_asset, "safety_check_executor_id", None) or db_asset.user_id
     if assigned_id:
         try:
@@ -904,8 +904,8 @@ async def import_assets(
                 reserve_4 = row_cell_str(row, df.columns, '预留4') or None
                 reserve_5 = row_cell_str(row, df.columns, '预留5') or None
                 reserve_6 = row_cell_str(row, df.columns, '预留6') or None
-                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '安全检查执行人ID'), default=None)
-                safety_check_executor_name = row_cell_str(row, df.columns, '安全检查执行人') or None
+                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '检查执行人ID'), default=None)
+                safety_check_executor_name = row_cell_str(row, df.columns, '检查执行人') or None
                 if safety_check_executor_id is None and safety_check_executor_name:
                     u = db.query(User).filter(
                         User.real_name == safety_check_executor_name.strip(),

@@ -22,7 +22,7 @@ from logger import logger
 def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
-from datetime import datetime
+from datetime import datetime, date
 from utils_time import now_east8
 from safety_check_linkage import create_system_allocated_task
 
@@ -529,7 +529,7 @@ async def update_asset(
         if "status" in update_data:
             del update_data["status"]  # 移除状态字段
         
-        # 记录旧值（包含所有可能修改的字段）
+        # 记录旧值（包含所有可能修改的字段，与 AssetUpdate 一致，避免未传字段被误判为有变更）
         old_values = {
             "category_id": asset.category_id,
             "name": asset.name,
@@ -542,7 +542,29 @@ async def update_asset(
             "seat_number": asset.seat_number,
             "user_id": asset.user_id,
             "user_group": asset.user_group,
-            "remark": asset.remark
+            "remark": asset.remark,
+            "quantity": asset.quantity,
+            "team": asset.team,
+            "purchase_date": asset.purchase_date,
+            "card_number": asset.card_number,
+            "safety_check_executor_id": asset.safety_check_executor_id,
+            "safety_check_executor_name": asset.safety_check_executor_name,
+            "computer_type": asset.computer_type,
+            "computer_usage": asset.computer_usage,
+            "computer_name": asset.computer_name,
+            "monitor1_model": asset.monitor1_model,
+            "monitor1_asset_number": asset.monitor1_asset_number,
+            "monitor1_serial": asset.monitor1_serial,
+            "monitor2_model": asset.monitor2_model,
+            "monitor2_asset_number": asset.monitor2_asset_number,
+            "monitor2_serial": asset.monitor2_serial,
+            "asset_contact": asset.asset_contact,
+            "reserve_1": asset.reserve_1,
+            "reserve_2": asset.reserve_2,
+            "reserve_3": asset.reserve_3,
+            "reserve_4": asset.reserve_4,
+            "reserve_5": asset.reserve_5,
+            "reserve_6": asset.reserve_6,
         }
         
         # 只保留真正有变化的字段
@@ -559,11 +581,18 @@ async def update_asset(
         if not changed_fields:
             raise HTTPException(status_code=400, detail="没有字段发生变化，无需提交编辑申请")
         
+        # 将 date/datetime 转为字符串，以便 json.dumps 序列化
+        def _serializable_value(v):
+            if isinstance(v, (date, datetime)):
+                return v.isoformat()
+            return v
+        serializable_changed = {k: _serializable_value(v) for k, v in changed_fields.items()}
+        
         # 创建编辑申请（只存储有变化的字段）
         db_request = AssetEditRequest(
             asset_id=asset_id,
             user_id=current_user.id,
-            edit_data=json.dumps(changed_fields, ensure_ascii=False),
+            edit_data=json.dumps(serializable_changed, ensure_ascii=False),
             status="pending"
         )
         db.add(db_request)

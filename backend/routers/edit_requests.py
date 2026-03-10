@@ -217,7 +217,7 @@ async def create_edit_request(
     if existing_request:
         raise HTTPException(status_code=400, detail="该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请")
     
-    # 记录旧值（包含所有可能修改的字段）
+    # 记录旧值（包含所有可能修改的字段，与 AssetUpdate 一致，避免未传字段被误判为有变更）
     old_values = {
         "category_id": asset.category_id,
         "name": asset.name,
@@ -230,7 +230,29 @@ async def create_edit_request(
         "seat_number": asset.seat_number,
         "user_id": asset.user_id,
         "user_group": asset.user_group,
-        "remark": asset.remark
+        "remark": asset.remark,
+        "quantity": asset.quantity,
+        "team": asset.team,
+        "purchase_date": asset.purchase_date.isoformat() if asset.purchase_date else None,
+        "card_number": asset.card_number,
+        "safety_check_executor_id": asset.safety_check_executor_id,
+        "safety_check_executor_name": asset.safety_check_executor_name,
+        "computer_type": asset.computer_type,
+        "computer_usage": asset.computer_usage,
+        "computer_name": asset.computer_name,
+        "monitor1_model": asset.monitor1_model,
+        "monitor1_asset_number": asset.monitor1_asset_number,
+        "monitor1_serial": asset.monitor1_serial,
+        "monitor2_model": asset.monitor2_model,
+        "monitor2_asset_number": asset.monitor2_asset_number,
+        "monitor2_serial": asset.monitor2_serial,
+        "asset_contact": asset.asset_contact,
+        "reserve_1": asset.reserve_1,
+        "reserve_2": asset.reserve_2,
+        "reserve_3": asset.reserve_3,
+        "reserve_4": asset.reserve_4,
+        "reserve_5": asset.reserve_5,
+        "reserve_6": asset.reserve_6,
     }
     
     # 只保留真正有变化的字段

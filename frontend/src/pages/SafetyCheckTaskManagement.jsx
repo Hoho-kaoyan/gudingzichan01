@@ -32,6 +32,7 @@ const SafetyCheckTaskManagement = () => {
   const [form] = Form.useForm()
   const [filterForm] = Form.useForm()
   const [sourceFilter, setSourceFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
 
   // 联动任务配置相关状态
   const [autoConfigModalVisible, setAutoConfigModalVisible] = useState(false)
@@ -59,6 +60,8 @@ const SafetyCheckTaskManagement = () => {
       const params = { ...filters, page: 1, limit: 100 }
       const source = filters.source !== undefined ? filters.source : sourceFilter
       if (source) params.source = source
+      const status = filters.status !== undefined ? filters.status : statusFilter
+      if (status) params.status = status
       const response = await api.get('/safety-check-tasks/', { params })
       setTasks(response.data.items || [])
     } catch (error) {
@@ -78,6 +81,15 @@ const SafetyCheckTaskManagement = () => {
     { value: 'resignation', label: '离职联动' }
   ]
   const getSourceLabel = (source) => SOURCE_OPTIONS.find(o => o.value === source)?.label || source || '-'
+
+  // 任务状态筛选选项（与后端 SafetyCheckTask.status 一致）
+  const STATUS_OPTIONS = [
+    { value: '', label: '全部' },
+    { value: 'pending', label: '进行中' },
+    { value: 'completed', label: '已完成' },
+    { value: 'overdue', label: '已逾期' },
+    { value: 'cancelled', label: '已取消' }
+  ]
 
   const fetchCheckTypes = async () => {
     try {
@@ -550,6 +562,18 @@ const SafetyCheckTaskManagement = () => {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <h2 style={{ margin: 0 }}>安全检查任务管理</h2>
         <Space wrap>
+          <span>任务状态：</span>
+          <Select
+            value={statusFilter || undefined}
+            onChange={(v) => {
+              setStatusFilter(v || '')
+              fetchTasks({ status: v || undefined })
+            }}
+            options={STATUS_OPTIONS}
+            style={{ width: 120 }}
+            placeholder="全部"
+            allowClear
+          />
           <span>任务来源：</span>
           <Select
             value={sourceFilter || undefined}

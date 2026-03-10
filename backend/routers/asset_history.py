@@ -21,6 +21,7 @@ def get_field_label(field_name: str) -> str:
         "name": "实物名称",
         "specification": "规格型号",
         "status": "状态",
+        "available_status": "可用状态",
         "mac_address": "MAC地址",
         "ip_address": "IP地址",
         "office_location": "存放办公地点",

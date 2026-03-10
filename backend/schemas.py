@@ -116,6 +116,8 @@ class AssetBase(BaseModel):
     name: str = Field(..., description="实物名称")
     specification: Optional[str] = Field(None, description="规格型号")
     status: str = Field(default="在用", description="状态：在用或在库")
+    available_status: str = Field(default="可用", description="可用状态：可用/维修中/已报废")
+    availability_status: Optional[str] = Field(None, description="可用状态：如可用/不可用/维修中等")
     mac_address: Optional[str] = Field(None, description="MAC地址")
     ip_address: Optional[str] = Field(None, description="IP地址")
     office_location: Optional[str] = Field(None, description="存放办公地点")
@@ -157,6 +159,7 @@ class AssetUpdate(BaseModel):
     name: Optional[str] = None
     specification: Optional[str] = None
     status: Optional[str] = None
+    available_status: Optional[str] = None
     mac_address: Optional[str] = None
     ip_address: Optional[str] = None
     office_location: Optional[str] = None

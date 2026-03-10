@@ -31,7 +31,7 @@ const Layout = () => {
   }
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout, isAdmin } = useAuth()
+  const { user, logout, isAdmin, isLeader } = useAuth()
 
   const handlePasswordSubmit = async () => {
     try {
@@ -123,6 +123,26 @@ const Layout = () => {
     return '审批管理'
   }
 
+  const renderMySafetyCheckLabel = () => {
+    if (pendingSafetyCheckCount > 0) {
+      return (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          我的安全检查任务
+          <Badge
+            count={pendingSafetyCheckCount}
+            size="small"
+            color="#fa8c16"
+            style={{
+              backgroundColor: '#fa8c16',
+              boxShadow: '0 0 0 1px #fff'
+            }}
+          />
+        </span>
+      )
+    }
+    return '我的安全检查任务'
+  }
+
   if (isAdmin) {
     menuItems.push(
       {
@@ -136,38 +156,29 @@ const Layout = () => {
         label: renderApprovalLabel()
       },
       {
+        key: '/my-safety-check-tasks',
+        icon: <CheckCircleOutlined />,
+        label: renderMySafetyCheckLabel()
+      },
+      {
         key: '/safety-check-tasks',
         icon: <FileTextOutlined />,
         label: '安全检查任务'
       }
     )
   } else {
-    const renderSafetyCheckLabel = () => {
-      if (pendingSafetyCheckCount > 0) {
-        return (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            我的检查任务
-            <Badge
-              count={pendingSafetyCheckCount}
-              size="small"
-              color="#fa8c16"
-              style={{
-                backgroundColor: '#fa8c16',
-                boxShadow: '0 0 0 1px #fff'
-              }}
-            />
-          </span>
-        )
-      }
-      return '我的检查任务'
+    menuItems.push({
+      key: '/my-safety-check-tasks',
+      icon: <CheckCircleOutlined />,
+      label: renderMySafetyCheckLabel()
+    })
+    if (isLeader) {
+      menuItems.push({
+        key: '/safety-check-tasks',
+        icon: <FileTextOutlined />,
+        label: '安全检查任务'
+      })
     }
-    menuItems.push(
-      {
-        key: '/my-safety-check-tasks',
-        icon: <CheckCircleOutlined />,
-        label: renderSafetyCheckLabel()
-      }
-    )
   }
 
   const userMenuItems = [

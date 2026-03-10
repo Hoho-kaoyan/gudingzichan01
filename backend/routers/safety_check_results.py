@@ -263,10 +263,13 @@ async def submit_check_result(
                 asset_to_update = db.query(Asset).filter(Asset.id == pending.asset_id).first()
                 if asset_to_update:
                     asset_to_update.user_id = pending.new_user_id
-                    # 更新所在组别
+                    # 更新所在组别与执行人
                     new_user = db.query(User).filter(User.id == pending.new_user_id).first()
                     if new_user:
                         asset_to_update.user_group = new_user.group
+                        # 同步更新执行人：默认与新使用人保持一致
+                        asset_to_update.safety_check_executor_id = new_user.id
+                        asset_to_update.safety_check_executor_name = new_user.real_name
                     
                     from logger import logger
                     logger.info(f"安全检查任务[{task.task_number}]完成，资产[{asset_to_update.asset_number}]调拨正式生效，移交予ID为[{pending.new_user_id}]的用户")

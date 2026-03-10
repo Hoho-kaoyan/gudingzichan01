@@ -15,6 +15,7 @@ const ASSET_FORM_FIELDS = [
   { name: 'name', label: '实物名称', type: 'input', required: true },
   { name: 'specification', label: '规格型号', type: 'input' },
   { name: 'status', label: '状态', type: 'select', options: [{ value: '在用', label: '在用' }, { value: '在库', label: '在库' }], adminOnly: true, required: true },
+  { name: 'available_status', label: '可用状态', type: 'select', options: [{ value: '可用', label: '可用' }, { value: '维修中', label: '维修中' }, { value: '已报废', label: '已报废' }], adminOrLeader: true },
   { name: 'mac_address', label: 'MAC地址', type: 'input' },
   { name: 'ip_address', label: 'IP地址', type: 'input' },
   { name: 'office_location', label: '存放办公地点', type: 'input' },
@@ -475,6 +476,13 @@ const AssetManagement = () => {
             </Tag>
           )
         }
+      },
+      {
+        title: '可用状态',
+        dataIndex: 'available_status',
+        key: 'available_status',
+        width: 88,
+        render: (v) => (v ? <Tag color={v === '可用' ? 'green' : v === '维修中' ? 'orange' : 'default'}>{v}</Tag> : '-')
       },
       {
         title: '使用人',

@@ -206,10 +206,7 @@ async def create_transfer_request(
         if asset.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="只能交接自己名下的资产")
 
-    # 【干预点0：全局离职逃逸拦截 - 该用户如有任何未结案件，都不允许发起新的流转】
-    check_any_unfinished_tasks_for_user(db, from_user_id)
-
-    # 【干预点1：创建交接申请前，拦截未完成安检】
+    # 【创建交接前：只查本单资产是否已完成安检】
     check_unfinished_tasks_for_asset_user(db, asset.id, from_user_id)
     
     # 创建交接申请，初始状态为待转入人确认
@@ -230,7 +227,7 @@ async def create_transfer_request(
     
     logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 创建资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}")
     
-    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务（优先使用资产的安全检查执行人ID，否则转出人）】
+    # 【干预点1 发放：顺利建单后（此刻没有未完成任务），自动下发一份针对本次交接的专属检查任务（优先使用资产的检查执行人ID，否则转出人）】
     try:
         from safety_check_linkage import create_system_allocated_task
         assigned_id = getattr(asset, "safety_check_executor_id", None) or from_user_id

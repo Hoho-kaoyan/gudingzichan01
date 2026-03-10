@@ -2,11 +2,25 @@
 Pydantic模式定义
 用于API请求和响应的数据验证
 """
-from pydantic import BaseModel, Field, validator, field_validator
-from typing import Optional, List, Literal
+from pydantic import BaseModel, Field, validator, field_validator, PlainSerializer
+from typing import Optional, List, Literal, Annotated
 from datetime import datetime, date
 from enum import Enum
 import json
+
+from utils_time import datetime_to_east8_iso
+
+
+def _serialize_east8(v: Optional[datetime]) -> Optional[str]:
+    """序列化 datetime 为东八区 ISO 字符串（API 返回用）"""
+    return datetime_to_east8_iso(v)
+
+
+# 用于 Response 的 datetime：JSON 序列化时统一输出东八区带时区字符串（如 2026-03-10T10:00:00+08:00）
+East8Datetime = Annotated[
+    datetime,
+    PlainSerializer(_serialize_east8, return_type=str, when_used="json"),
+]
 
 
 # 用户相关模式
@@ -44,8 +58,8 @@ class PasswordChange(BaseModel):
 
 class UserResponse(UserBase):
     id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
     
     class Config:
         from_attributes = True
@@ -89,7 +103,7 @@ class AssetCategoryCreate(AssetCategoryBase):
 
 class AssetCategoryResponse(AssetCategoryBase):
     id: int
-    created_at: datetime
+    created_at: East8Datetime
     
     class Config:
         from_attributes = True
@@ -114,8 +128,8 @@ class AssetBase(BaseModel):
     team: Optional[str] = Field(None, description="所在团队")
     purchase_date: Optional[date] = Field(None, description="购置日期")
     card_number: Optional[str] = Field(None, description="卡片编号")
-    safety_check_executor_id: Optional[int] = Field(None, description="安全检查执行人ID")
-    safety_check_executor_name: Optional[str] = Field(None, description="安全检查执行人姓名")
+    safety_check_executor_id: Optional[int] = Field(None, description="检查执行人ID")
+    safety_check_executor_name: Optional[str] = Field(None, description="检查执行人姓名")
     computer_type: Optional[str] = Field(None, description="电脑类型")
     computer_usage: Optional[str] = Field(None, description="电脑应用")
     computer_name: Optional[str] = Field(None, description="计算机名")
@@ -177,8 +191,8 @@ class AssetUpdate(BaseModel):
 
 class AssetResponse(AssetBase):
     id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
     category: Optional[AssetCategoryResponse] = None
     user: Optional[UserResponse] = None
     safety_check_executor: Optional["UserResponse"] = None
@@ -212,10 +226,10 @@ class TransferRequestResponse(BaseModel):
     approval_comment: Optional[str] = None
     to_user_confirmed: Optional[int] = None
     to_user_confirm_comment: Optional[str] = None
-    to_user_confirmed_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    approved_at: Optional[datetime] = None
+    to_user_confirmed_at: Optional[East8Datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
+    approved_at: Optional[East8Datetime] = None
     asset: Optional[AssetResponse] = None
     from_user: Optional[UserResponse] = None
     to_user: Optional[UserResponse] = None
@@ -247,9 +261,9 @@ class ReturnRequestResponse(BaseModel):
     status: str
     approver_id: Optional[int] = None
     approval_comment: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    approved_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
+    approved_at: Optional[East8Datetime] = None
     # 申请人修改的字段
     mac_address: Optional[str] = None
     ip_address: Optional[str] = None
@@ -332,9 +346,9 @@ class AssetEditRequestResponse(BaseModel):
     status: str
     approver_id: Optional[int] = None
     approval_comment: Optional[str] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    approved_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
+    approved_at: Optional[East8Datetime] = None
     edit_data: dict
     asset: Optional[AssetResponse] = None
     user: Optional[UserResponse] = None
@@ -383,8 +397,8 @@ class SafetyCheckTypeUpdate(BaseModel):
 
 class SafetyCheckTypeResponse(SafetyCheckTypeBase):
     id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
     created_by_id: Optional[int] = None
     created_by: Optional[UserResponse] = None
     
@@ -427,13 +441,13 @@ class SafetyCheckTaskResponse(BaseModel):
     check_type_id: int
     title: str
     description: Optional[str] = None
-    deadline: Optional[datetime] = None
+    deadline: Optional[East8Datetime] = None
     status: str
     source: Optional[str] = None  # manual/inbound/transfer/reallocation/resignation
     created_by_id: int
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    completed_at: Optional[datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
+    completed_at: Optional[East8Datetime] = None
     check_type: Optional[SafetyCheckTypeResponse] = None
     created_by: Optional[UserResponse] = None
     total_assets: Optional[int] = None  # 总资产数
@@ -450,8 +464,8 @@ class SafetyCheckTaskResponse(BaseModel):
 class SafetyCheckAutoConfigResponse(BaseModel):
     id: int
     default_check_type_id: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: Optional[East8Datetime] = None
+    updated_at: Optional[East8Datetime] = None
     default_check_type: Optional[SafetyCheckTypeResponse] = None
 
     class Config:
@@ -475,7 +489,7 @@ class SafetyCheckAssetTypeMappingResponse(BaseModel):
     id: int
     asset_type: str
     check_type_id: int
-    created_at: datetime
+    created_at: East8Datetime
     check_type: Optional[SafetyCheckTypeResponse] = None
 
     class Config:
@@ -491,9 +505,9 @@ class TaskAssetResponse(BaseModel):
     check_result: Optional[str] = None
     check_comment: Optional[str] = None
     check_items_result: Optional[List[dict]] = None
-    checked_at: Optional[datetime] = None
-    created_at: datetime
-    updated_at: Optional[datetime] = None
+    checked_at: Optional[East8Datetime] = None
+    created_at: East8Datetime
+    updated_at: Optional[East8Datetime] = None
     asset: Optional[AssetResponse] = None
     assigned_user: Optional[UserResponse] = None
     
@@ -526,8 +540,8 @@ class SafetyCheckHistoryResponse(BaseModel):
     check_result: str
     check_comment: Optional[str] = None
     check_items_result: Optional[List[dict]] = None
-    checked_at: datetime
-    created_at: datetime
+    checked_at: East8Datetime
+    created_at: East8Datetime
     task_number: Optional[str] = None
     check_type: Optional[SafetyCheckTypeResponse] = None
     asset: Optional[AssetResponse] = None

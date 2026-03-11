@@ -21,14 +21,14 @@
 
 ## bug
 
-1. **修改使用人/使用人组别后的提示**：保存时当前提示「成功」→ 应改为提示「已发布检查任务」或类似，以区分普通编辑与触发检查任务的场景。
-2. **选择使用人后未自动带出**：选择使用人后应自动填入「使用人组别」「EHR 号」「安全检查执行人」「执行人 EHR 号」等，当前未自动带出。
-3. **用户信息栏位名称不明确**：人员相关展示需明确标注「姓名」「EHR 号」等栏位名称，避免混淆。
+1. **【已修复】修改使用人/使用人组别后的提示**：保存时当前提示「成功」→ 应改为提示「已发布检查任务」或类似，以区分普通编辑与触发检查任务的场景。
+2. **【已修复】选择使用人后未自动带出**：选择使用人后应自动填入「使用人组别」「EHR 号」「安全检查执行人」「执行人 EHR 号」等，当前未自动带出。
+3. **【已修复】用户信息栏位名称不明确**：人员相关展示需明确标注「姓名」「EHR 号」等栏位名称，避免混淆（已实现：有 EHR 号处标注「EHR号：xxx」小字）。
 4. **没有产生编辑申请**：预期为普通用户走编辑申请、组长仅组内直接更新。当前实现已符合；若仍复现，排查 DB 角色、assets.py 的 old_values、前端对 `message: "编辑申请已提交"` 的识别。
 5. **时区问题**：已按方案 A 实现——API 返回 datetime 统一为东八区 ISO 字符串（`utils_time.datetime_to_east8_iso` + schemas `East8Datetime`），前端无需改。
 6. **联动安全检查问题**：预期只查本单资产。已落实：创建交接/退库均仅校验本单资产是否已完成安检（创建交接去掉全局检查，创建退库改为本单资产检查）；确认与审批交接本就只查本单资产。
-7. 发起交接任务，如果联动发起了检查任务，那么交接任务状态应为“待完成联动安全检查”
-8. 撤回交接任务应该能同时撤回因发起交接任务而联动发起的检查任务。
+7. **【已修复】** 发起交接任务，如果联动发起了检查任务，那么交接任务状态应为“待完成联动安全检查”（B4：linked_safety_task_id + pending_linked_safety_check）
+8. **【已修复】** 撤回交接任务应该能同时撤回因发起交接任务而联动发起的检查任务。（B5：撤回时取消联动 SafetyCheckTask）
 9. **安全检查任务在某些情况下没有红点提示**：当前逻辑下管理员不显示「我的安全检查任务」红点（TransferContext 中 role===admin 时待检查数置 0）；与需求 1 一致，应改为管理员也拉取并显示待检查数。见上方实现顺序中 Bug 9 说明。
 
 10. **【已修复】returns.py 缺少 logger 导入**：记录退回历史失败时会报 `NameError: name 'logger' is not defined`，已补 `from logger import logger`。
@@ -43,6 +43,11 @@
 - Bug 5：时区（已按方案 A 实现，API 返回东八区 ISO）
 - Bug 6：联动安检只查本单（创建交接/退库仅校验本单资产已完成）
 - Bug 10：returns.py 缺少 logger 导入（已修复）
+- **Bug 1**：修改使用人后的提示（后端返回 `triggered_safety_check`，前端区分「已发布检查任务」/「更新成功」；使用人栏位旁增加提示语）
+- **Bug 2**：选择使用人后未自动带出（使用人 onChange 时自动填入使用人组别、检查执行人、检查执行人姓名；清空使用人时一并清空）
+- **Bug 3**：用户信息栏位名称不明确（有 EHR 号处统一为「EHR号：xxx」且小字显示，仅姓名处不改）
+- **Bug 7**：交接单状态「待完成联动安全检查」（TransferRequest 增加 `linked_safety_task_id`，接口返回 `pending_linked_safety_check`，前端状态列展示「待完成联动安全检查」）
+- **Bug 8**：撤回交接同时撤回联动检查任务（撤回时若存在 `linked_safety_task_id` 则将对应 SafetyCheckTask 置为 cancelled）
 
 ---
 
@@ -61,17 +66,19 @@
 |------|-----------|------------|----------------------|
 | **1** | **4. 离职全资产生成任务** | 标记离职后该用户**全部**资产生成安全检查任务，且含终端/数据类。核对现有离职联动是否已覆盖全部资产、检查类型是否含终端/数据。 | 若当前按「部分资产」或部分类型创建，改为全量/全类型可能增加任务量，需确认业务与性能。 |
 | **2** | **5. 任务搜索全字段** | 发布安全检查任务时搜索关键字覆盖所有相关字段。后端/前端搜索参数与接口扩展。 | 仅扩展搜索条件，注意 SQL 与索引，避免全表模糊查。 |
-| **3** | **6 + Bug 7/8** | 6：交接需联动安检完成后发起（状态与体验）。Bug 7：交接单状态展示「待完成联动安全检查」。Bug 8：撤回交接时同时撤回因该交接联动的检查任务。 | **Bug 8** 需建立「交接单 ↔ 联动任务」关联（如 TransferRequest 存关联 task_id，或 SafetyCheckTask 存 source_extra）；取消任务/撤回交接顺序要约定，避免状态不一致。**Bug 7** 依赖能否查到「该交接单关联的未完成任务」，与 Bug 8 共用关联数据。 |
+| **3** | **6 + Bug 7/8** | 6：交接需联动安检完成后发起（状态与体验）。~~Bug 7~~/**Bug 8**：**已实现**（B4/B5：linked_safety_task_id、待完成联动安全检查展示、撤回时取消联动任务）。 | 已落实 B4/B5；需求 6 若需进一步体验优化可单独排期。 |
 
 ### 待修复 Bug 实现顺序（原因与需改代码）
 
+**已完成（本轮）**：B1（Bug 1 修改使用人提示）、B2（Bug 2 选择使用人自动带出）、B3（Bug 3 EHR 号标注）、B4（Bug 7 待完成联动安全检查）、B5（Bug 8 撤回交接同时取消联动任务）；另：资产交接模块状态列 UI 改为描边标签样式。
+
 | 顺序 | Bug | 原因 | 需改代码/位置 |
 |------|-----|------|----------------|
-| **B1** | **Bug 1 修改使用人后的提示** | 前端资产保存后统一用「更新成功」，未区分「仅编辑」与「触发检查任务」两种场景，用户无法感知已下发安检任务。 | 前端 `AssetManagement.jsx`：PUT 成功后根据 payload 是否包含使用人/组别变更（或后端返回 `triggered_safety_check: true`），提示「已发布检查任务」而非「更新成功」；或后端在更新资产接口返回该标识，前端据此分支提示。 |
-| **B2** | **Bug 2 选择使用人后未自动带出** | 表单中「使用人」与「使用人组别」「EHR」「检查执行人」「执行人 EHR」独立填写，未做联动回填。 | 前端 `AssetManagement.jsx`：使用人 `select_user` 变更时，根据选中 user 自动 setFieldsValue 填入 `user_group`、`safety_check_executor_id`/`safety_check_executor_name` 及 EHR（需用户列表或详情含 ehr_number/real_name/group）。 |
-| **B3** | **Bug 3 用户信息栏位名称不明确** | 人员相关展示未统一标注「姓名」「EHR 号」等，易与编号/ID 混淆。 | 前端：资产/交接/审批等涉及人员展示的列表与表单，为「姓名」「EHR 号」等加 label 或表头明确标注（如 `姓名(real_name)`、`EHR号(ehr_number)`）。 |
-| **B4** | **Bug 7 交接单状态「待完成联动安全检查」** | 创建交接时若联动下发了安检任务，交接单状态仍为「待转入人确认」等，未体现「待完成联动安检」。 | 后端：`TransferRequest` 增加可选字段如 `linked_safety_task_id`；创建交接且 `create_system_allocated_task` 返回 task 后写入并 commit。状态逻辑：若存在未完成的 linked 任务则展示/计算为「待完成联动安全检查」。前端：交接列表/详情根据该字段或接口返回的派生状态展示「待完成联动安全检查」。 |
-| **B5** | **Bug 8 撤回交接同时撤回联动检查任务** | 撤回交接只删除了 `TransferRequest`，未处理创建交接时联动的 SafetyCheckTask，导致任务仍存在。 | 后端：`TransferRequest` 存 `linked_safety_task_id`（与 Bug 7 一起）。`cancel_transfer_request` 中：若 `request.linked_safety_task_id` 存在，将对应 `SafetyCheckTask` 状态置为 `cancelled`（并可选将关联 `TaskAsset` 一并取消），再删除交接。需迁移为 `transfer_requests` 表增加 `linked_safety_task_id`。 |
+| ~~**B1**~~ | ~~Bug 1 修改使用人后的提示~~ | 已实现。 | 后端返回 `triggered_safety_check`；前端提示区分；使用人栏位 extra 提示语。 |
+| ~~**B2**~~ | ~~Bug 2 选择使用人后未自动带出~~ | 已实现。 | 使用人 Select onChange 自动 setFieldsValue 组别/执行人/执行人姓名。 |
+| ~~**B3**~~ | ~~Bug 3 用户信息栏位名称不明确~~ | 已实现。 | 有 EHR 号处展示为「EHR号：xxx」小字，资产/交接/审批/退回/历史/用户管理等。 |
+| ~~**B4**~~ | ~~Bug 7 交接单状态「待完成联动安全检查」~~ | 已实现。 | TransferRequest.linked_safety_task_id、迁移脚本、接口 pending_linked_safety_check、前端状态列。 |
+| ~~**B5**~~ | ~~Bug 8 撤回交接同时撤回联动检查任务~~ | 已实现。 | cancel_transfer_request 中取消 linked SafetyCheckTask 后再删交接单。 |
 | **B6** | **Bug 9 红点提示（管理员）** | `TransferContext` 中 `fetchPendingSafetyChecks` 在 `user.role === 'admin'` 时直接 `setPendingSafetyCheckCount(0)`，管理员不拉取待检查数。 | 前端 `contexts/TransferContext.jsx`：去掉 `if (!user || user.role === 'admin') { setPendingSafetyCheckCount(0); return }`，管理员也调用 `/safety-check-results/my-tasks`（或等价接口）拉取待检查数并展示红点。 |
 | **B7** | **Bug 11 退库审批未清空执行人** | 退库审批通过时情况2/3 只置空 `user_id`/`user_group`，未置空执行人，与「使用人置空则执行人同步」不一致。 | 后端 `routers/approvals.py`：在「情况2」与「情况3」分支中，`asset.user_id = None`、`asset.user_group = None` 后增加 `asset.safety_check_executor_id = None`、`asset.safety_check_executor_name = None`。 |
 | **B8** | **Bug 12 审批交接禁止转入人为管理员** | 需求 1 允许管理员名下可有资产，审批逻辑仍禁止 to_user.role == "admin"，与需求冲突。 | 后端 `routers/approvals.py`：审批交接通过处删除或注释 `if to_user.role == "admin": raise HTTPException(..., "使用人不能是管理员")`；若业务确需禁止，则保留并在文档注明。 |
@@ -81,5 +88,5 @@
 
 **Bug 9（红点提示）**：与上表 B6 一致，管理员也拉取并显示「我的安全检查任务」待检查数。
 
-**小结**：需求实现顺序 1 → 2 → 3（离职全资产生成任务 → 任务搜索全字段 → 6 与 Bug 7/8）。待修复 Bug 可按 B1～B11 排期；B4/B5 依赖同一数据（TransferRequest 存 linked_safety_task_id），建议一起做；B7、B8 为后端小改动可优先。
+**小结**：需求实现顺序 1 → 2 → 3（离职全资产生成任务 → 任务搜索全字段 → 6 与 Bug 7/8）。B1～B5 已完成；待修复 Bug 从 B6 起（B6 红点、B7/B8 审批小改动可优先、B9～B11 按排期）。
 

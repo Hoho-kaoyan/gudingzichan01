@@ -20,6 +20,26 @@ import api from '../utils/api'
 
 const { Header, Sider, Content } = AntLayout
 
+const ORANGE_BADGE_STYLE = { backgroundColor: '#fa8c16', boxShadow: '0 0 0 1px #fff' }
+
+function SidebarSafetyCheckLabel() {
+  const { pendingSafetyCheckCount } = useTransfer()
+  if (pendingSafetyCheckCount > 0) {
+    return (
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        我的检查任务
+        <Badge
+          count={pendingSafetyCheckCount}
+          size="small"
+          color="#fa8c16"
+          style={ORANGE_BADGE_STYLE}
+        />
+      </span>
+    )
+  }
+  return '我的安全检查任务'
+}
+
 const Layout = () => {
   const [collapsed, setCollapsed] = useState(false)
   const [passwordModalVisible, setPasswordModalVisible] = useState(false)
@@ -60,25 +80,25 @@ const Layout = () => {
   }
   const { pendingTransferConfirmCount, pendingApprovalCount, pendingSafetyCheckCount } = useTransfer()
 
-  const renderTransferLabel = () => {
-    if (pendingTransferConfirmCount > 0) {
+  // 与资产交接同一套：有数量时显示小橙点 Badge（#fa8c16）
+  const renderLabelWithOrangeBadge = (label, count) => {
+    if (count > 0) {
       return (
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          资产交接
+          {label}
           <Badge
-            count={pendingTransferConfirmCount}
+            count={count}
             size="small"
             color="#fa8c16"
-            style={{
-              backgroundColor: '#fa8c16',
-              boxShadow: '0 0 0 1px #fff'
-            }}
+            style={{ backgroundColor: '#fa8c16', boxShadow: '0 0 0 1px #fff' }}
           />
         </span>
       )
     }
-    return '资产交接'
+    return label
   }
+
+  const renderTransferLabel = () => renderLabelWithOrangeBadge('资产交接', pendingTransferConfirmCount)
 
   const menuItems = [
     {
@@ -103,45 +123,7 @@ const Layout = () => {
     }
   ]
 
-  const renderApprovalLabel = () => {
-    if (pendingApprovalCount > 0) {
-      return (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          审批管理
-          <Badge
-            count={pendingApprovalCount}
-            size="small"
-            color="#fa8c16"
-            style={{
-              backgroundColor: '#fa8c16',
-              boxShadow: '0 0 0 1px #fff'
-            }}
-          />
-        </span>
-      )
-    }
-    return '审批管理'
-  }
-
-  const renderMySafetyCheckLabel = () => {
-    if (pendingSafetyCheckCount > 0) {
-      return (
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          我的安全检查任务
-          <Badge
-            count={pendingSafetyCheckCount}
-            size="small"
-            color="#fa8c16"
-            style={{
-              backgroundColor: '#fa8c16',
-              boxShadow: '0 0 0 1px #fff'
-            }}
-          />
-        </span>
-      )
-    }
-    return '我的安全检查任务'
-  }
+  const renderApprovalLabel = () => renderLabelWithOrangeBadge('审批管理', pendingApprovalCount)
 
   if (isAdmin) {
     menuItems.push(
@@ -158,7 +140,7 @@ const Layout = () => {
       {
         key: '/my-safety-check-tasks',
         icon: <CheckCircleOutlined />,
-        label: renderMySafetyCheckLabel()
+        label: <SidebarSafetyCheckLabel />
       },
       {
         key: '/safety-check-tasks',
@@ -170,7 +152,7 @@ const Layout = () => {
     menuItems.push({
       key: '/my-safety-check-tasks',
       icon: <CheckCircleOutlined />,
-      label: renderMySafetyCheckLabel()
+      label: <SidebarSafetyCheckLabel />
     })
     if (isLeader) {
       menuItems.push({
@@ -215,14 +197,15 @@ const Layout = () => {
         <div style={{ height: 32, margin: 16, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontWeight: 'bold' }}>
           {collapsed ? '资产' : '固定资产管理'}
         </div>
-        <div style={{ flex: 1, overflow: 'auto', paddingBottom: 48, height: 'calc(100vh - 96px)' }}>
+        <div style={{ flex: 1, overflow: 'auto', paddingBottom: 48, height: 'calc(100vh - 96px)' }} className="sider-menu-wrap">
           <Menu
+            key={`badge-${pendingTransferConfirmCount}-${pendingApprovalCount}-${pendingSafetyCheckCount}`}
             theme="dark"
             selectedKeys={[location.pathname]}
             mode="inline"
             items={menuItems}
             onClick={({ key }) => navigate(key)}
-            style={{ background: '#c41d3f', borderRight: 'none' }}
+            style={{ background: '#c41d3f', borderRight: 'none', overflow: 'visible' }}
           />
         </div>
         <div 

@@ -19,7 +19,7 @@ const { TextArea } = Input
 
 const MySafetyCheckTasks = () => {
   const { user } = useAuth()
-  const { refreshPendingSafetyChecks } = useTransfer()
+  const { refreshPendingSafetyChecks, syncPendingSafetyCheckCountFromTasks } = useTransfer()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(false)
   const [activeTab, setActiveTab] = useState('pending')
@@ -38,8 +38,12 @@ const MySafetyCheckTasks = () => {
     setLoading(true)
     try {
       const response = await api.get('/safety-check-results/my-tasks')
-      setTasks(response.data.items || [])
+      const items = response.data?.items ?? []
+      console.log('[侧栏-待检查] MySafetyCheckTasks fetchMyTasks 成功', { itemsLength: items.length, pendingCounts: items.map(t => t?.pending_count ?? t?.pendingCount) })
+      setTasks(items)
+      syncPendingSafetyCheckCountFromTasks(items)
     } catch (error) {
+      console.error('[侧栏-待检查] MySafetyCheckTasks fetchMyTasks 失败', error?.response?.status, error?.response?.data)
       message.error('获取任务列表失败')
     } finally {
       setLoading(false)

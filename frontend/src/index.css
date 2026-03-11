@@ -79,3 +79,13 @@ html, body {
 .custom-sider-trigger:hover {
   background: #a0172f;
 }
+
+/* 侧栏菜单项不裁剪 Badge 小橙点 */
+.sider-menu-wrap .ant-menu-item,
+.sider-menu-wrap .ant-menu-item-inner,
+.sider-menu-wrap .ant-menu-title-content {
+  overflow: visible !important;
+}
+.sider-menu-wrap .ant-badge {
+  overflow: visible !important;
+}

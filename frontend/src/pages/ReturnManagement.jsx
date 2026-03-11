@@ -180,34 +180,40 @@ const ReturnManagement = () => {
     {
       title: '资产编号',
       dataIndex: ['asset', 'asset_number'],
-      key: 'asset_number'
+      key: 'asset_number',
+      width: 96
     },
     {
       title: '资产名称',
       dataIndex: ['asset', 'name'],
-      key: 'asset_name'
+      key: 'asset_name',
+      width: 100
     },
     {
       title: '退回人',
       dataIndex: ['user', 'real_name'],
-      key: 'user'
+      key: 'user',
+      width: 88
     },
     {
       title: '退回原因',
       dataIndex: 'reason',
       key: 'reason',
+      width: 100,
       ellipsis: true
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
+      width: 88,
       render: getStatusTag
     },
     {
       title: '审批意见',
       dataIndex: 'approval_comment',
       key: 'approval_comment',
+      width: 100,
       ellipsis: true,
       render: (text) => text || '-'
     },
@@ -215,6 +221,7 @@ const ReturnManagement = () => {
       title: '申请时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 120,
       render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
     }
   ]
@@ -276,6 +283,7 @@ const ReturnManagement = () => {
         dataSource={returns}
         loading={loading}
         rowKey="id"
+        scroll={{ x: 692 }}
       />
 
       <Modal

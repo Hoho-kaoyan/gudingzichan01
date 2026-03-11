@@ -214,27 +214,32 @@ const TransferManagement = () => {
     {
       title: '资产编号',
       dataIndex: ['asset', 'asset_number'],
-      key: 'asset_number'
+      key: 'asset_number',
+      width: 96
     },
     {
       title: '资产名称',
       dataIndex: ['asset', 'name'],
-      key: 'asset_name'
+      key: 'asset_name',
+      width: 100
     },
     {
-      title: '转出人（姓名）',
+      title: '转出人',
       dataIndex: ['from_user', 'real_name'],
-      key: 'from_user'
+      key: 'from_user',
+      width: 88
     },
     {
-      title: '转入人（姓名）',
+      title: '转入人',
       dataIndex: ['to_user', 'real_name'],
-      key: 'to_user'
+      key: 'to_user',
+      width: 88
     },
     {
       title: '交接原因',
       dataIndex: 'reason',
       key: 'reason',
+      width: 100,
       ellipsis: true
     },
     {
@@ -311,6 +316,7 @@ const TransferManagement = () => {
       title: '审批意见',
       dataIndex: 'approval_comment',
       key: 'approval_comment',
+      width: 100,
       ellipsis: true,
       render: (text) => text || '-'
     },
@@ -318,11 +324,13 @@ const TransferManagement = () => {
       title: '申请时间',
       dataIndex: 'created_at',
       key: 'created_at',
+      width: 120,
       render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
     },
     {
       title: '操作',
       key: 'action',
+      width: 130,
       render: (_, record) => {
         const isToUser = record.to_user_id === currentUser?.id
         const isFromUser = record.from_user_id === currentUser?.id
@@ -429,6 +437,7 @@ const TransferManagement = () => {
         dataSource={transfers}
         loading={loading}
         rowKey="id"
+        scroll={{ x: 1260 }}
       />
 
       <Modal

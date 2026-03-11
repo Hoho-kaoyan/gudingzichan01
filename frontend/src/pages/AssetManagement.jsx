@@ -98,8 +98,7 @@ const AssetManagement = () => {
     const payload = {
       search: values.keyword || undefined,
       category_id: values.category_id || undefined,
-      status: values.status === '在库' ? undefined : values.status || undefined,
-      in_stock: values.status === '在库' ? true : undefined
+      status: values.status || undefined
     }
     setFilters(payload)
     fetchAssets(payload)
@@ -480,7 +479,8 @@ const AssetManagement = () => {
         title: '使用人',
         dataIndex: ['user', 'real_name'],
         key: 'user',
-        width: 80
+        width: 80,
+        render: (_, record) => record.user ? `${record.user.real_name} (${record.user.ehr_number})` : '在库'
       },
       {
         title: '组别',
@@ -858,7 +858,7 @@ const AssetManagement = () => {
               } else if (field.name === 'user_id') {
                 value = currentAssetDetail.user?.real_name
                   ? `${currentAssetDetail.user.real_name} (${currentAssetDetail.user.ehr_number})`
-                  : null
+                  : '在库'
               } else if (field.name === 'safety_check_executor_id') {
                 const exec = currentAssetDetail.safety_check_executor
                 value = exec?.real_name

@@ -372,13 +372,11 @@ const ReturnManagement = () => {
               value={newKeeperSearchValue}
               options={userOptions
                 .filter(option => {
-                  const isNotWarehouse = option.ehrNumber !== '1000000'
-                  // 组长发起时，新的保管人也必须是本组成员（如果指定了的话）
                   if (currentUser?.role === 'leader') {
                     const u = users.find(item => item.id === option.value)
-                    return isNotWarehouse && u?.group === currentUser?.group
+                    return u?.group === currentUser?.group
                   }
-                  return isNotWarehouse
+                  return true
                 })
                 .filter(option => option.label.toLowerCase().includes((newKeeperSearchValue || '').toLowerCase()))
                 .slice(0, 5)

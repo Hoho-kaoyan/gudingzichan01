@@ -231,7 +231,6 @@ async def get_assets(
     category_id: Optional[int] = None,
     status: Optional[str] = None,
     user_id: Optional[int] = None,
-    in_stock: Optional[bool] = Query(None, description="筛选在库资产（user_id=仓库用户）"),
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
@@ -239,14 +238,6 @@ async def get_assets(
     """获取资产列表，支持筛选"""
     # 只查询未删除的资产
     query = db.query(Asset).filter(Asset.deleted_at.is_(None))
-    
-    # 在库筛选：筛选归属仓库用户的资产（方案乙）
-    if in_stock:
-        warehouse_user = db.query(User).filter(User.ehr_number == "1000000").first()
-        if warehouse_user:
-            query = query.filter(Asset.user_id == warehouse_user.id)
-        else:
-            query = query.filter(Asset.user_id.is_(None))  # 无仓库用户时退化为空结果
     
     # 管理员可以筛选指定用户的资产
     if user_id is not None:

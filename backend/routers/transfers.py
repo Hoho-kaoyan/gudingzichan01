@@ -177,10 +177,6 @@ async def create_transfer_request(
     if not to_user:
         raise HTTPException(status_code=404, detail="转入用户不存在")
     
-    # 禁止选择"仓库"用户作为转入用户
-    if to_user.ehr_number == "1000000":
-        raise HTTPException(status_code=400, detail="不能将资产交接给仓库用户")
-    
     # 确定转出用户（资产的使用人或当前用户）
     from_user_id = asset.user_id or current_user.id
     

@@ -183,16 +183,9 @@ async def approve_request(
                     request.remark is not None
                 ])
                 
-                # 获取"仓库"用户
-                warehouse_user = db.query(User).filter(User.ehr_number == "1000000").first()
-                if not warehouse_user:
-                    raise HTTPException(status_code=500, detail="仓库用户不存在，请先初始化数据库")
-                
-                # 根据三种情况处理
-                # 注意：无论哪种情况，审批通过后资产状态都变为"在库"
+                # 根据三种情况处理：审批通过后资产状态均为"在库"，未指定新保管人时使用人置空
                 if changed_user:
                     # 情况1：申请人修改了保管人
-                    # 状态变为"在库"，其他字段按照申请人修改的内容修改
                     new_user = db.query(User).filter(User.id == request.new_user_id).first()
                     if new_user:
                         if new_user.role == "admin":
@@ -202,25 +195,19 @@ async def approve_request(
                     else:
                         raise HTTPException(status_code=404, detail="指定的保管人不存在")
                     
-                    # 更新其他字段（如果申请人提供了，包括null值）
                     asset.mac_address = request.mac_address
                     asset.ip_address = request.ip_address
                     asset.office_location = request.office_location
                     asset.floor = request.floor
                     asset.seat_number = request.seat_number
                     asset.remark = request.remark
-                    
-                    # 状态变为"在库"
                     asset.status = "在库"
                     
                 elif has_changes:
-                    # 情况2：申请人未修改保管人但修改了其他信息
-                    # 保管人改为"仓库"用户，其他内容按照申请人修改的内容修改
-                    asset.user_id = warehouse_user.id
-                    asset.user_group = warehouse_user.group
+                    # 情况2：申请人未修改保管人但修改了其他信息 → 使用人置空，退回在库
+                    asset.user_id = None
+                    asset.user_group = None
                     asset.status = "在库"
-                    
-                    # 更新申请人修改的字段（包括null值）
                     asset.mac_address = request.mac_address
                     asset.ip_address = request.ip_address
                     asset.office_location = request.office_location
@@ -229,12 +216,10 @@ async def approve_request(
                     asset.remark = request.remark
                     
                 else:
-                    # 情况3：申请人没有修改任何字段
-                    # 保管人改为"仓库"用户，除状态外其他内容不变
-                    asset.user_id = warehouse_user.id
-                    asset.user_group = warehouse_user.group
+                    # 情况3：申请人没有修改任何字段 → 使用人置空，退回在库
+                    asset.user_id = None
+                    asset.user_group = None
                     asset.status = "在库"
-                    # 其他字段保持不变
                 
                 # 将该资产未完成的安全检查任务标记为已退库
                 pending_task_assets = db.query(TaskAsset).filter(
@@ -254,7 +239,7 @@ async def approve_request(
                     create_history = get_create_history_record()
                     new_values = {
                         "user_id": asset.user_id,
-                        "user_name": new_user_obj.real_name if new_user_obj else "仓库",
+                        "user_name": new_user_obj.real_name if new_user_obj else "在库",
                         "user_group": asset.user_group,
                         "status": asset.status,
                         "mac_address": asset.mac_address,
@@ -269,9 +254,9 @@ async def approve_request(
                     if changed_user:
                         desc = f"审批通过资产退回：保管人改为 {new_user_obj.real_name if new_user_obj else ''}，状态改为在库，其他字段按申请人修改"
                     elif has_changes:
-                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为在库，字段按申请人修改"
+                        desc = "审批通过资产退回：资产退回在库，状态改为在库，字段按申请人修改"
                     else:
-                        desc = f"审批通过资产退回：资产退回仓库（{warehouse_user.real_name}），状态改为在库"
+                        desc = "审批通过资产退回：资产退回在库，状态改为在库"
                     
                     create_history(
                         db=db,

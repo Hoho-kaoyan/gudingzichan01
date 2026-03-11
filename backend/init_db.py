@@ -16,13 +16,6 @@ INITIAL_USERS = [
         "password": "1234567"
     },
     {
-        "ehr_number": "1000000",
-        "real_name": "仓库",
-        "group": "仓库",
-        "role": "user",
-        "password": "1234567"
-    },
-    {
         "ehr_number": "1234567",
         "real_name": "测试组长1",
         "group": "测试组",

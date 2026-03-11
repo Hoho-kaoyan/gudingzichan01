@@ -466,13 +466,11 @@ const TransferManagement = () => {
               options={userOptions
                 .filter(option => {
                   const isNotSelf = option.value !== currentUser?.id
-                  const isNotWarehouse = option.ehrNumber !== '1000000'
-                  // 组长发起时，接收人必须是本组组员
                   if (isLeader) {
                     const user = users.find(u => u.id === option.value)
-                    return isNotSelf && isNotWarehouse && user?.group === currentUser?.group
+                    return isNotSelf && user?.group === currentUser?.group
                   }
-                  return isNotSelf && isNotWarehouse
+                  return isNotSelf
                 })
                 .filter(option => option.label.toLowerCase().includes((toUserSearchValue || '').toLowerCase()))
                 .map(option => ({

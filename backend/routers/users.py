@@ -264,9 +264,6 @@ async def delete_user(
     if user.deleted_at is not None:
         raise HTTPException(status_code=400, detail="用户已被删除")
     
-    # 禁止删除"仓库"用户（EHR号为1000000）
-    if user.ehr_number == "1000000":
-        raise HTTPException(status_code=400, detail="不能删除仓库用户")
     # 禁止管理员删除自己
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="不能删除自己的账号")

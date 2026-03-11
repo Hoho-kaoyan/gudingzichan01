@@ -29,8 +29,7 @@ const UserManagement = () => {
     try {
       const params = { ...filters, ...(extraFilters || {}) }
       const response = await api.get('/users/', { params })
-      // 方案乙：不在用户列表中显示仓库用户
-      setUsers((response.data || []).filter(u => u.ehr_number !== '1000000'))
+      setUsers(response.data || [])
     } catch (error) {
       message.error('获取用户列表失败')
     } finally {
@@ -221,8 +220,6 @@ const UserManagement = () => {
       title: '操作',
       key: 'action',
       render: (_, record) => {
-        // 仓库用户（EHR号为1000000）不能删除；管理员不能删除自己
-        const isWarehouse = record.ehr_number === '1000000'
         const isSelf = record.id === currentUser?.id
         return (
           <Space>
@@ -239,7 +236,7 @@ const UserManagement = () => {
                 标记离职
               </Button>
             )}
-            {!isWarehouse && !isSelf && (
+            {!isSelf && (
               <Popconfirm
                 title="确定要删除吗？"
                 onConfirm={() => handleDelete(record.id)}

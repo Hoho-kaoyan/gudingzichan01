@@ -110,7 +110,7 @@ def create_asset_import_excel():
             "24寸/IPS",
             1,
             "在库",
-            "仓库",
+            "",
             "1F",
             "",
             "",

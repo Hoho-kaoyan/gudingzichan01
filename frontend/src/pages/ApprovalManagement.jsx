@@ -14,6 +14,10 @@ const ApprovalManagement = () => {
   const [transfers, setTransfers] = useState([])
   const [returns, setReturns] = useState([])
   const [edits, setEdits] = useState([])
+  const [approvedTransfers, setApprovedTransfers] = useState([])
+  const [approvedReturns, setApprovedReturns] = useState([])
+  const [approvedEdits, setApprovedEdits] = useState([])
+  const [approvalListTab, setApprovalListTab] = useState('pending') // 'pending' | 'approved'
   const [categories, setCategories] = useState([])
   const [users, setUsers] = useState([])
   const [loading, setLoading] = useState(false)
@@ -29,6 +33,12 @@ const ApprovalManagement = () => {
     fetchCategories()
     fetchUsers()
   }, [])
+
+  useEffect(() => {
+    if (approvalListTab === 'approved') {
+      fetchApprovedData()
+    }
+  }, [approvalListTab])
 
   const fetchTransfers = async () => {
     setLoading(true)
@@ -61,6 +71,31 @@ const ApprovalManagement = () => {
       setEdits(response.data)
     } catch (error) {
       message.error('获取编辑申请列表失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const fetchApprovedData = async () => {
+    setLoading(true)
+    try {
+      const [tApproved, tRejected, rApproved, rRejected, eApproved, eRejected] = await Promise.all([
+        api.get('/transfers/', { params: { status: 'approved', limit: 500 } }),
+        api.get('/transfers/', { params: { status: 'rejected', limit: 500 } }),
+        api.get('/returns/', { params: { status: 'approved', limit: 500 } }),
+        api.get('/returns/', { params: { status: 'rejected', limit: 500 } }),
+        api.get('/edit-requests/', { params: { status: 'approved', limit: 500 } }),
+        api.get('/edit-requests/', { params: { status: 'rejected', limit: 500 } })
+      ])
+      const merge = (a, b) => {
+        const list = [...(a.data || []), ...(b.data || [])]
+        return list.sort((x, y) => new Date(y.approved_at || 0) - new Date(x.approved_at || 0))
+      }
+      setApprovedTransfers(merge(tApproved, tRejected))
+      setApprovedReturns(merge(rApproved, rRejected))
+      setApprovedEdits(merge(eApproved, eRejected))
+    } catch (error) {
+      message.error('获取已审批记录失败')
     } finally {
       setLoading(false)
     }
@@ -172,6 +207,19 @@ const ApprovalManagement = () => {
     }
   ]
 
+  const approvedTransferColumns = [
+    { title: '资产编号', dataIndex: ['asset', 'asset_number'], key: 'asset_number' },
+    { title: '资产名称', dataIndex: ['asset', 'name'], key: 'asset_name' },
+    { title: '转出人', dataIndex: ['from_user', 'real_name'], key: 'from_user' },
+    { title: '转入人', dataIndex: ['to_user', 'real_name'], key: 'to_user' },
+    { title: '交接原因', dataIndex: 'reason', key: 'reason' },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
+    { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
+  ]
+
   const returnColumns = [
     {
       title: '资产编号',
@@ -214,6 +262,18 @@ const ApprovalManagement = () => {
         </Space>
       )
     }
+  ]
+
+  const approvedReturnColumns = [
+    { title: '资产编号', dataIndex: ['asset', 'asset_number'], key: 'asset_number' },
+    { title: '资产名称', dataIndex: ['asset', 'name'], key: 'asset_name' },
+    { title: '退回人', dataIndex: ['user', 'real_name'], key: 'user' },
+    { title: '退回原因', dataIndex: 'reason', key: 'reason' },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
+    { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
   ]
 
   const editColumns = [
@@ -301,6 +361,26 @@ const ApprovalManagement = () => {
     }
   ]
 
+  const approvedEditColumns = [
+    { title: '资产编号', dataIndex: ['asset', 'asset_number'], key: 'asset_number' },
+    { title: '资产名称', dataIndex: ['asset', 'name'], key: 'asset_name' },
+    { title: '申请人', dataIndex: ['user', 'real_name'], key: 'user' },
+    {
+      title: '修改字段',
+      key: 'edit_fields',
+      render: (_, record) => {
+        if (!record.edit_data || Object.keys(record.edit_data).length === 0) return '-'
+        const labelMap = { category_id: '所属大类', name: '实物名称', specification: '规格型号', status: '状态', mac_address: 'MAC地址', ip_address: 'IP地址', office_location: '存放办公地点', floor: '存放楼层', seat_number: '座位号', user_id: '使用人', user_group: '组别', remark: '备注说明', quantity: '件数', team: '所在团队', purchase_date: '购置日期', card_number: '卡片编号', safety_check_executor_id: '安全检查执行人', safety_check_executor_name: '安全检查执行人姓名', computer_type: '电脑类型', computer_usage: '电脑应用', computer_name: '计算机名', monitor1_model: '连接显示器1型号', monitor1_asset_number: '连接显示器1资产编号', monitor1_serial: '显示器1序列号', monitor2_model: '连接显示器2型号', monitor2_asset_number: '连接显示器2资产编号', monitor2_serial: '显示器2序列号', asset_contact: '资产管理联系人', reserve_1: '预留1', reserve_2: '预留2', reserve_3: '预留3', reserve_4: '预留4', reserve_5: '预留5', reserve_6: '预留6' }
+        return Object.keys(record.edit_data).map(key => labelMap[key] || key).join('、')
+      }
+    },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
+    { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
+  ]
+
   const tabItems = [
     {
       key: 'transfers',
@@ -340,10 +420,31 @@ const ApprovalManagement = () => {
     }
   ]
 
+  const mainTabItems = [
+    {
+      key: 'pending',
+      label: '待审批',
+      children: <Tabs items={tabItems} />
+    },
+    {
+      key: 'approved',
+      label: '已审批',
+      children: (
+        <Tabs
+          items={[
+            { key: 'transfers', label: `交接 (${approvedTransfers.length})`, children: <Table columns={approvedTransferColumns} dataSource={approvedTransfers} loading={loading} rowKey="id" /> },
+            { key: 'returns', label: `退回 (${approvedReturns.length})`, children: <Table columns={approvedReturnColumns} dataSource={approvedReturns} loading={loading} rowKey="id" /> },
+            { key: 'edits', label: `编辑 (${approvedEdits.length})`, children: <Table columns={approvedEditColumns} dataSource={approvedEdits} loading={loading} rowKey="id" /> }
+          ]}
+        />
+      )
+    }
+  ]
+
   return (
     <div>
       <h1>审批管理</h1>
-      <Tabs items={tabItems} />
+      <Tabs activeKey={approvalListTab} onChange={setApprovalListTab} items={mainTabItems} />
 
       <Modal
         title={`审批${currentRequest?.type === 'transfer' ? '交接' : currentRequest?.type === 'return' ? '退回' : '编辑'}申请`}

@@ -9,6 +9,7 @@ from database import get_db
 from models import ReturnRequest, Asset, User
 from schemas import ReturnRequestCreate, ReturnRequestResponse
 from auth import get_current_user
+from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history

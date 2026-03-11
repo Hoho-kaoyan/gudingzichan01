@@ -237,7 +237,8 @@ class TransferRequestResponse(BaseModel):
     from_user: Optional[UserResponse] = None
     to_user: Optional[UserResponse] = None
     created_by: Optional[UserResponse] = None
-    
+    approver: Optional[UserResponse] = None
+
     class Config:
         from_attributes = True
 
@@ -278,7 +279,8 @@ class ReturnRequestResponse(BaseModel):
     asset: Optional[AssetResponse] = None
     user: Optional[UserResponse] = None
     new_user: Optional[UserResponse] = None
-    
+    approver: Optional[UserResponse] = None
+
     class Config:
         from_attributes = True
 

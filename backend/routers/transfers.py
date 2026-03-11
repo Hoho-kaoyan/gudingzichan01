@@ -2,7 +2,7 @@
 资产交接路由
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
@@ -130,7 +130,12 @@ async def get_transfer_requests(
         if search_conditions:
             query = query.filter(or_(*search_conditions))
     
-    requests = query.order_by(TransferRequest.created_at.desc()).offset(skip).limit(limit).all()
+    requests = query.options(
+        joinedload(TransferRequest.asset),
+        joinedload(TransferRequest.from_user),
+        joinedload(TransferRequest.to_user),
+        joinedload(TransferRequest.approver)
+    ).order_by(TransferRequest.created_at.desc()).offset(skip).limit(limit).all()
     return [TransferRequestResponse.model_validate(req) for req in requests]
 
 

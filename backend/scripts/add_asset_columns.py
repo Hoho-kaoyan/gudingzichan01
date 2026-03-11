@@ -35,6 +35,7 @@ NEW_COLUMNS = [
     ("reserve_4", "VARCHAR(200)"),
     ("reserve_5", "VARCHAR(200)"),
     ("reserve_6", "VARCHAR(200)"),
+    ("available_status", "VARCHAR(20) NOT NULL DEFAULT '可用'"),
 ]
 
 

@@ -15,6 +15,7 @@ const ASSET_FORM_FIELDS = [
   { name: 'name', label: '实物名称', type: 'input', required: true },
   { name: 'specification', label: '规格型号', type: 'input' },
   { name: 'status', label: '状态', type: 'select', options: [{ value: '在用', label: '在用' }, { value: '在库', label: '在库' }], adminOnly: true, required: true },
+  { name: 'available_status', label: '可用状态', type: 'select', options: [{ value: '可用', label: '可用' }, { value: '维修中', label: '维修中' }, { value: '已报废', label: '已报废' }], adminOrLeader: true },
   { name: 'mac_address', label: 'MAC地址', type: 'input' },
   { name: 'ip_address', label: 'IP地址', type: 'input' },
   { name: 'office_location', label: '存放办公地点', type: 'input' },
@@ -27,8 +28,8 @@ const ASSET_FORM_FIELDS = [
   { name: 'team', label: '所在团队', type: 'input' },
   { name: 'purchase_date', label: '购置日期', type: 'date' },
   { name: 'card_number', label: '卡片编号', type: 'input' },
-  { name: 'safety_check_executor_id', label: '安全检查执行人', type: 'select_user' },
-  { name: 'safety_check_executor_name', label: '安全检查执行人姓名', type: 'input' },
+  { name: 'safety_check_executor_id', label: '检查执行人', type: 'select_user' },
+  { name: 'safety_check_executor_name', label: '检查执行人姓名', type: 'input' },
   { name: 'computer_type', label: '电脑类型', type: 'input' },
   { name: 'computer_usage', label: '电脑应用', type: 'input' },
   { name: 'computer_name', label: '计算机名', type: 'input' },
@@ -474,6 +475,13 @@ const AssetManagement = () => {
             </Tag>
           )
         }
+      },
+      {
+        title: '可用状态',
+        dataIndex: 'available_status',
+        key: 'available_status',
+        width: 88,
+        render: (v) => (v ? <Tag color={v === '可用' ? 'green' : v === '维修中' ? 'orange' : 'default'}>{v}</Tag> : '-')
       },
       {
         title: '使用人',

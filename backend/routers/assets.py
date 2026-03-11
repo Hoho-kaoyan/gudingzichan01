@@ -34,6 +34,7 @@ ASSET_FIELD_LABELS = {
     "name": "实物名称",
     "specification": "规格型号",
     "status": "状态",
+    "available_status": "可用状态",
     "mac_address": "MAC地址",
     "ip_address": "IP地址",
     "office_location": "存放办公地点",
@@ -46,8 +47,8 @@ ASSET_FIELD_LABELS = {
     "team": "所在团队",
     "purchase_date": "购置日期",
     "card_number": "卡片编号",
-    "safety_check_executor_id": "安全检查执行人",
-    "safety_check_executor_name": "安全检查执行人姓名",
+    "safety_check_executor_id": "检查执行人",
+    "safety_check_executor_name": "检查执行人姓名",
     "computer_type": "电脑类型",
     "computer_usage": "电脑应用",
     "computer_name": "计算机名",
@@ -141,6 +142,9 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
     status = _get_rd(row_data, "实物状态", "状态") or "在用"
     if status == "库存备用":
         status = "在库"
+    available_status = _get_rd(row_data, "可用状态") or "可用"
+    if available_status not in ("可用", "维修中", "已报废"):
+        available_status = "可用"
     mac_address = _get_rd(row_data, "终端mac地址", "MAC地址") or None
     ip_address = _get_rd(row_data, "终端IP号", "IP地址") or None
     office_location = _get_rd(row_data, "存放办公地点") or None
@@ -170,8 +174,8 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
     reserve_4 = _get_rd(row_data, "预留4") or None
     reserve_5 = _get_rd(row_data, "预留5") or None
     reserve_6 = _get_rd(row_data, "预留6") or None
-    safety_check_executor_id = str_to_int(_get_rd(row_data, "安全检查执行人ID"), default=None)
-    safety_check_executor_name = _get_rd(row_data, "安全检查执行人") or None
+    safety_check_executor_id = str_to_int(_get_rd(row_data, "检查执行人ID"), default=None)
+    safety_check_executor_name = _get_rd(row_data, "检查执行人") or None
     if safety_check_executor_id is None and safety_check_executor_name:
         u = db.query(User).filter(
             User.real_name == safety_check_executor_name.strip(),
@@ -205,9 +209,15 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
                 user_id = user.id
                 if not user_group:
                     user_group = user.group
+    # 若仅修改了使用人而未显式指定执行人，则将执行人重置为新使用人
+    if user_id is not None and safety_check_executor_id is None and not safety_check_executor_name:
+        u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+        if u:
+            safety_check_executor_id = u.id
+            safety_check_executor_name = u.real_name
     parsed = {
         "category_id": category.id, "name": name, "specification": specification,
-        "status": status, "mac_address": mac_address, "ip_address": ip_address,
+        "status": status, "available_status": available_status, "mac_address": mac_address, "ip_address": ip_address,
         "office_location": office_location, "floor": floor, "seat_number": seat_number,
         "user_id": user_id, "user_group": user_group, "remark": remark,
         "quantity": quantity, "team": team, "purchase_date": purchase_date,
@@ -411,14 +421,12 @@ async def create_asset(
                 del asset_dict["status"]
             asset_dict["status"] = "在用"
     else:
-        # 管理员创建时，如指定了使用人则检查（使用人不能是管理员）
+        # 管理员创建时，可指定使用人（含管理员本人，以便管理员名下可有资产并对自己资产做检查）
         user_id = asset_dict.get("user_id")
         if user_id:
             user = db.query(User).filter(User.id == user_id).first()
             if not user:
                 raise HTTPException(status_code=404, detail="使用人不存在")
-            if user.role == "admin":
-                raise HTTPException(status_code=400, detail="使用人不能是管理员")
             if not asset_dict.get("user_group"):
                 asset_dict["user_group"] = user.group
 
@@ -451,7 +459,7 @@ async def create_asset(
     db.commit()
     db.refresh(db_asset)
     
-    # 【新增逻辑】：如果资产落库后有使用人或安全检查执行人，下发安检联动任务（优先使用安全检查执行人ID）
+    # 【新增逻辑】：如果资产落库后有使用人或检查执行人，下发安检联动任务（优先使用检查执行人ID）
     assigned_id = getattr(db_asset, "safety_check_executor_id", None) or db_asset.user_id
     if assigned_id:
         try:
@@ -515,10 +523,12 @@ async def update_asset(
         if existing_request:
             raise HTTPException(status_code=400, detail="该资产已有待审批的编辑申请，请等待审批完成或先撤回现有申请")
         
-        # 构建编辑数据（排除状态字段，普通用户不能修改状态）
+        # 构建编辑数据（排除状态字段，普通用户不能修改状态/可用状态）
         update_data = asset_data.dict(exclude_unset=True)
         if "status" in update_data:
             del update_data["status"]  # 移除状态字段
+        if "available_status" in update_data:
+            del update_data["available_status"]
         
         # 记录旧值（包含所有可能修改的字段，与 AssetUpdate 一致，避免未传字段被误判为有变更）
         old_values = {
@@ -526,6 +536,7 @@ async def update_asset(
             "name": asset.name,
             "specification": asset.specification,
             "status": asset.status,
+            "available_status": asset.available_status,
             "mac_address": asset.mac_address,
             "ip_address": asset.ip_address,
             "office_location": asset.office_location,
@@ -625,6 +636,7 @@ async def update_asset(
         "name": asset.name,
         "specification": asset.specification,
         "status": asset.status,
+        "available_status": asset.available_status,
         "mac_address": asset.mac_address,
         "ip_address": asset.ip_address,
         "office_location": asset.office_location,
@@ -638,11 +650,8 @@ async def update_asset(
     # 更新字段
     update_data = asset_data.dict(exclude_unset=True)
     
-    # 使用人不能是管理员
-    if "user_id" in update_data and update_data["user_id"] is not None:
-        new_usr = db.query(User).filter(User.id == update_data["user_id"]).first()
-        if new_usr and new_usr.role == "admin":
-            raise HTTPException(status_code=400, detail="使用人不能是管理员")
+    # 使用人可为管理员（管理员名下可有资产并对自己资产做检查）
+    # （不再限制「使用人不能是管理员」）
     
     # 【改动：延迟调拨生效拦截】
     is_reallocation = False
@@ -864,6 +873,10 @@ async def import_assets(
                     error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                     continue
                 status = '在库' if status_raw == '库存备用' else status_raw
+                available_status_raw = row_cell_str(row, df.columns, '可用状态') or '可用'
+                if available_status_raw not in ('可用', '维修中', '已报废'):
+                    available_status_raw = '可用'
+                available_status = available_status_raw
                 mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
                 ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
                 office_location = row_cell_str(row, df.columns, '存放办公地点') or None
@@ -895,8 +908,8 @@ async def import_assets(
                 reserve_4 = row_cell_str(row, df.columns, '预留4') or None
                 reserve_5 = row_cell_str(row, df.columns, '预留5') or None
                 reserve_6 = row_cell_str(row, df.columns, '预留6') or None
-                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '安全检查执行人ID'), default=None)
-                safety_check_executor_name = row_cell_str(row, df.columns, '安全检查执行人') or None
+                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '检查执行人ID'), default=None)
+                safety_check_executor_name = row_cell_str(row, df.columns, '检查执行人') or None
                 if safety_check_executor_id is None and safety_check_executor_name:
                     u = db.query(User).filter(
                         User.real_name == safety_check_executor_name.strip(),
@@ -930,15 +943,7 @@ async def import_assets(
                             errors.append(f"第{row_number}行：{error_msg}")
                             error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                             continue
-                # 使用人不能是管理员
-                if user_id is not None:
-                    custodian = db.query(User).filter(User.id == user_id).first()
-                    if custodian and custodian.role == "admin":
-                        error_count += 1
-                        error_msg = "使用人不能是管理员"
-                        errors.append(f"第{row_number}行：{error_msg}")
-                        error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
-                        continue
+                # 使用人可为管理员（管理员名下可有资产）
                 if user_id is None:
                     user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
                     if user_ehr:
@@ -954,13 +959,20 @@ async def import_assets(
                             error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
                             continue
                 
+                # 若仅修改了使用人且未显式指定执行人，则将执行人重置为新使用人
+                if user_id is not None and safety_check_executor_id is None and not safety_check_executor_name:
+                    u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+                    if u:
+                        safety_check_executor_id = u.id
+                        safety_check_executor_name = u.real_name
+                
                 assigned_id = safety_check_executor_id or user_id
                 
                 # 已存在且未删除：比对差异，有差异则加入冲突列表供用户选择覆盖/保持
                 if existing_any and existing_any.deleted_at is None:
                     parsed = {
                         "category_id": category.id, "name": name, "specification": specification,
-                        "status": status, "mac_address": mac_address, "ip_address": ip_address,
+                        "status": status, "available_status": available_status, "mac_address": mac_address, "ip_address": ip_address,
                         "office_location": office_location, "floor": floor, "seat_number": seat_number,
                         "user_id": user_id, "user_group": user_group, "remark": remark,
                         "quantity": quantity, "team": team, "purchase_date": purchase_date,
@@ -995,6 +1007,7 @@ async def import_assets(
                     existing_any.name = name
                     existing_any.specification = specification or None
                     existing_any.status = status
+                    existing_any.available_status = available_status
                     existing_any.mac_address = mac_address or None
                     existing_any.ip_address = ip_address or None
                     existing_any.office_location = office_location or None
@@ -1041,6 +1054,7 @@ async def import_assets(
                     name=name,
                     specification=specification or None,
                     status=status,
+                    available_status=available_status,
                     mac_address=mac_address or None,
                     ip_address=ip_address or None,
                     office_location=office_location or None,
@@ -1144,12 +1158,7 @@ async def resolve_import_conflicts(
         except Exception as e:
             errors_resolve.append(f"资产 {asset.asset_number} 解析 row_data 失败：{str(e)}")
             continue
-        # 使用人不能是管理员
-        if parsed.get("user_id") is not None:
-            custodian = db.query(User).filter(User.id == parsed["user_id"]).first()
-            if custodian and custodian.role == "admin":
-                errors_resolve.append(f"资产 {asset.asset_number}：使用人不能是管理员，已跳过覆盖")
-                continue
+        # 使用人可为管理员（管理员名下可有资产）
         # 覆盖前保存旧值，用于流转记录与编辑历史
         old_user_id = asset.user_id
         old_name = asset.name
@@ -1159,6 +1168,7 @@ async def resolve_import_conflicts(
         asset.name = parsed["name"]
         asset.specification = parsed["specification"]
         asset.status = parsed["status"]
+        asset.available_status = parsed.get("available_status", "可用")
         asset.mac_address = parsed["mac_address"]
         asset.ip_address = parsed["ip_address"]
         asset.office_location = parsed["office_location"]

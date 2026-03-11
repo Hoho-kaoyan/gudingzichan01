@@ -72,6 +72,9 @@ async def approve_request(
                 # 更新使用人组别
                 if to_user:
                     asset.user_group = to_user.group
+                    # 同步更新执行人：默认与新使用人保持一致
+                    asset.safety_check_executor_id = to_user.id
+                    asset.safety_check_executor_name = to_user.real_name
                 
                 # 获取转出用户信息
                 from_user = db.query(User).filter(User.id == request.from_user_id).first()
@@ -192,6 +195,9 @@ async def approve_request(
                             raise HTTPException(status_code=400, detail="使用人不能是管理员")
                         asset.user_id = request.new_user_id
                         asset.user_group = new_user.group
+                        # 同步更新执行人：默认与新使用人保持一致
+                        asset.safety_check_executor_id = new_user.id
+                        asset.safety_check_executor_name = new_user.real_name
                     else:
                         raise HTTPException(status_code=404, detail="指定的保管人不存在")
                     
@@ -349,12 +355,15 @@ async def approve_request(
                         setattr(asset, field, value)
                         changed_fields.append(field)
                 
-                # 如果更新了使用人，自动更新组别
+                # 如果更新了使用人，自动更新组别与执行人
                 old_user_id = old_values.get("user_id")
                 if "user_id" in edit_data and edit_data["user_id"] is not None:
                     user = db.query(User).filter(User.id == edit_data["user_id"]).first()
                     if user:
                         asset.user_group = user.group
+                        # 同步更新执行人：默认与新使用人保持一致
+                        asset.safety_check_executor_id = user.id
+                        asset.safety_check_executor_name = user.real_name
                 
                 # 处理安全检查任务
                 # 如果修改了使用人，更新未完成的安全检查任务到新接收人

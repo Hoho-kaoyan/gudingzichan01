@@ -24,6 +24,13 @@ class AssetStatus(str, enum.Enum):
     IN_STOCK = "在库"    # 在库
 
 
+class AssetAvailability(str, enum.Enum):
+    """资产可用状态枚举"""
+    AVAILABLE = "可用"
+    IN_REPAIR = "维修中"
+    SCRAPPED = "已报废"
+
+
 class ApprovalStatus(str, enum.Enum):
     """审批状态枚举"""
     WAITING_CONFIRMATION = "waiting_confirmation"  # 待转入人确认
@@ -79,6 +86,8 @@ class Asset(Base):
     name = Column(String(200), nullable=False, comment="实物名称")
     specification = Column(String(200), nullable=True, comment="规格型号（可为空）")
     status = Column(String(20), default=AssetStatus.IN_USE.value, nullable=False, comment="状态：在用或在库")
+    available_status = Column(String(20), default=AssetAvailability.AVAILABLE.value, nullable=False, comment="可用状态：可用/维修中/已报废")
+    availability_status = Column(String(50), nullable=True, comment="可用状态：如可用/不可用/维修中等")
     mac_address = Column(String(50), nullable=True, comment="MAC地址")
     ip_address = Column(String(50), nullable=True, comment="IP地址")
     
@@ -95,8 +104,8 @@ class Asset(Base):
     team = Column(String(100), nullable=True, comment="所在团队")
     purchase_date = Column(Date, nullable=True, comment="购置日期")
     card_number = Column(String(100), nullable=True, comment="卡片编号")
-    safety_check_executor_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="安全检查执行人ID，为空则用使用人")
-    safety_check_executor_name = Column(String(100), nullable=True, comment="安全检查执行人姓名")
+    safety_check_executor_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="检查执行人ID，为空则用使用人")
+    safety_check_executor_name = Column(String(100), nullable=True, comment="检查执行人姓名")
     computer_type = Column(String(100), nullable=True, comment="电脑类型")
     computer_usage = Column(String(200), nullable=True, comment="电脑应用")
     computer_name = Column(String(200), nullable=True, comment="计算机名")

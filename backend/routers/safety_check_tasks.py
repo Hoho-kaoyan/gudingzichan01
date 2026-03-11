@@ -73,20 +73,19 @@ async def create_task(
     db.add(db_task)
     db.flush()  # 获取任务ID
     
-    # 为每个资产创建任务资产关联记录
+    # 为每个资产创建任务资产关联记录：有执行人则派给执行人，否则派给使用人
     created_count = 0
     skipped_count = 0
     for asset in assets:
-        # 如果资产没有使用人，跳过该资产
-        if not asset.user_id:
+        assigned_id = getattr(asset, "safety_check_executor_id", None) or asset.user_id
+        if not assigned_id:
             skipped_count += 1
             continue
         
-        # 创建任务资产关联
         task_asset = TaskAsset(
             task_id=db_task.id,
             asset_id=asset.id,
-            assigned_user_id=asset.user_id,
+            assigned_user_id=assigned_id,
             status="pending"
         )
         db.add(task_asset)
@@ -94,7 +93,7 @@ async def create_task(
     
     if created_count == 0:
         db.rollback()
-        raise HTTPException(status_code=400, detail="所选资产都没有使用人，无法创建任务")
+        raise HTTPException(status_code=400, detail="所选资产都没有使用人或执行人，无法创建任务")
     
     db.commit()
     db.refresh(db_task)

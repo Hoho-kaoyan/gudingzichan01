@@ -26,6 +26,10 @@ const TransferManagement = () => {
   const [currentTransfer, setCurrentTransfer] = useState(null)
   const [form] = Form.useForm()
   const selectedToUserId = Form.useWatch('to_user_id', form)
+  const selectedAssetId = Form.useWatch('asset_id', form)
+  const selectedAsset = assets.find(a => a.id === selectedAssetId)
+  // 组长交接自己名下资产时与普通用户一致，可选所有用户（含管理员）；交接组内他人资产时仅能选本组
+  const isLeaderTransferringOwnAsset = isLeader && selectedAsset && selectedAsset.user_id === currentUser?.id
   const [confirmForm] = Form.useForm()
   const [filtersForm] = Form.useForm()
   const [filters, setFilters] = useState({})
@@ -478,7 +482,8 @@ const TransferManagement = () => {
               options={userOptions
                 .filter(option => {
                   const isNotSelf = option.value !== currentUser?.id
-                  if (isLeader) {
+                  // 组长交接自己名下资产时可选所有人（含管理员）；交接组内他人资产时仅本组
+                  if (isLeader && !isLeaderTransferringOwnAsset) {
                     const user = users.find(u => u.id === option.value)
                     return isNotSelf && user?.group === currentUser?.group
                   }

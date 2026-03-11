@@ -63,8 +63,7 @@ async def approve_request(
                 to_user = db.query(User).filter(User.id == request.to_user_id).first()
                 if not to_user:
                     raise HTTPException(status_code=404, detail="转入用户不存在")
-                if to_user.role == "admin":
-                    raise HTTPException(status_code=400, detail="使用人不能是管理员")
+                # 需求1：允许管理员名下可有资产，交接可转给管理员，不再限制 to_user.role == "admin"
                 old_user_id = asset.user_id
                 old_user = db.query(User).filter(User.id == old_user_id).first() if old_user_id else None
                 
@@ -213,6 +212,8 @@ async def approve_request(
                     # 情况2：申请人未修改保管人但修改了其他信息 → 使用人置空，退回在库
                     asset.user_id = None
                     asset.user_group = None
+                    asset.safety_check_executor_id = None
+                    asset.safety_check_executor_name = None
                     asset.status = "在库"
                     asset.mac_address = request.mac_address
                     asset.ip_address = request.ip_address
@@ -225,6 +226,8 @@ async def approve_request(
                     # 情况3：申请人没有修改任何字段 → 使用人置空，退回在库
                     asset.user_id = None
                     asset.user_group = None
+                    asset.safety_check_executor_id = None
+                    asset.safety_check_executor_name = None
                     asset.status = "在库"
                 
                 # 将该资产未完成的安全检查任务标记为已退库

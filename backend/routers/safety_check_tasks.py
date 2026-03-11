@@ -5,6 +5,9 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
+from sqlalchemy.exc import IntegrityError
+import random
+import string
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
@@ -22,14 +25,37 @@ import json
 router = APIRouter()
 
 
-def generate_task_number(db: Session) -> str:
+def generate_task_number(db: Session, retry_count: int = 0) -> str:
     """生成任务编号：SAFETY-YYYY-NNN"""
     year = now_east8().year
-    # 查询今年已有的任务数量
-    count = db.query(SafetyCheckTask).filter(
-        SafetyCheckTask.task_number.like(f"SAFETY-{year}-%")
-    ).count()
-    number = f"SAFETY-{year}-{str(count + 1).zfill(3)}"
+    prefix = f"SAFETY-{year}-"
+    # 采用 MAX 逻辑获取今年最大的末尾数字，比 count 更稳健（防止删除后编号重复）
+    last_task = db.query(SafetyCheckTask).filter(
+        SafetyCheckTask.task_number.like(f"{prefix}%")
+    ).order_by(SafetyCheckTask.task_number.desc()).first()
+    
+    next_num = 1
+    if last_task:
+        try:
+            # 提取最后三位或更多的数字部分
+            last_num_str = last_task.task_number.replace(prefix, "")
+            # 过滤掉可能的随机后缀（如果有的话）
+            last_num_clean = "".join(filter(str.isdigit, last_num_str.split('-')[0]))
+            if last_num_clean:
+                next_num = int(last_num_clean) + 1
+        except Exception:
+            # 降级方案
+            next_num = db.query(SafetyCheckTask).filter(
+                SafetyCheckTask.task_number.like(f"{prefix}%")
+            ).count() + 1
+            
+    number = f"{prefix}{str(next_num).zfill(3)}"
+    
+    # 如果是重试，由于已经发生了 IntegrityError，必须加上随机后缀打破竞态
+    if retry_count > 0:
+        random_str = ''.join(random.choices(string.ascii_uppercase + string.digits, k=4))
+        number = f"{number}-{random_str}"
+        
     return number
 
 
@@ -55,51 +81,63 @@ async def create_task(
     ).all()
     if len(assets) != len(task_data.asset_ids):
         raise HTTPException(status_code=400, detail="部分资产不存在或已删除")
-    
-    # 生成任务编号
-    task_number = generate_task_number(db)
-    
-    # 创建任务（管理员手动发布，来源为 manual）
-    db_task = SafetyCheckTask(
-        task_number=task_number,
-        check_type_id=task_data.check_type_id,
-        title=task_data.title,
-        description=task_data.description,
-        deadline=task_data.deadline,
-        created_by_id=current_user.id,
-        status="pending",
-        source="manual"
-    )
-    db.add(db_task)
-    db.flush()  # 获取任务ID
-    
-    # 为每个资产创建任务资产关联记录：有执行人则派给执行人，否则派给使用人
-    created_count = 0
-    skipped_count = 0
-    for asset in assets:
-        assigned_id = getattr(asset, "safety_check_executor_id", None) or asset.user_id
-        if not assigned_id:
-            skipped_count += 1
-            continue
-        
-        task_asset = TaskAsset(
-            task_id=db_task.id,
-            asset_id=asset.id,
-            assigned_user_id=assigned_id,
-            status="pending"
-        )
-        db.add(task_asset)
-        created_count += 1
-    
-    if created_count == 0:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="所选资产都没有使用人或执行人，无法创建任务")
-    
-    db.commit()
-    db.refresh(db_task)
-    
-    # 返回任务详情
-    return await get_task_detail(db_task.id, db, current_user)
+
+    # 引入重试机制解决并发编号冲突（Bug 13 / B9）
+    max_retries = 3
+    for retry_count in range(max_retries):
+        try:
+            # 生成任务编号
+            task_number = generate_task_number(db, retry_count)
+            
+            # 创建任务（管理员手动发布，来源为 manual）
+            db_task = SafetyCheckTask(
+                task_number=task_number,
+                check_type_id=task_data.check_type_id,
+                title=task_data.title,
+                description=task_data.description,
+                deadline=task_data.deadline,
+                created_by_id=current_user.id,
+                status="pending",
+                source="manual"
+            )
+            db.add(db_task)
+            db.flush()  # 获取任务ID
+            
+            # 为每个资产创建任务资产关联记录
+            created_count = 0
+            for asset in assets:
+                assigned_id = getattr(asset, "safety_check_executor_id", None) or asset.user_id
+                if not assigned_id:
+                    continue
+                
+                task_asset = TaskAsset(
+                    task_id=db_task.id,
+                    asset_id=asset.id,
+                    assigned_user_id=assigned_id,
+                    status="pending"
+                )
+                db.add(task_asset)
+                created_count += 1
+            
+            if created_count == 0:
+                db.rollback()
+                raise HTTPException(status_code=400, detail="所选资产都没有使用人或执行人，无法创建任务")
+            
+            db.commit()
+            db.refresh(db_task)
+            # 返回任务详情
+            return await get_task_detail(db_task.id, db, current_user)
+            
+        except IntegrityError:
+            db.rollback()
+            if retry_count == max_retries - 1:
+                raise HTTPException(status_code=500, detail="任务编号生成冲突，请稍后重试")
+            continue  # 重试生成带随机后缀的新编号
+        except HTTPException:
+            raise
+        except Exception as e:
+            db.rollback()
+            raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/", response_model=dict)

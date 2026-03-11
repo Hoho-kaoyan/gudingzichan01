@@ -87,7 +87,6 @@ class Asset(Base):
     specification = Column(String(200), nullable=True, comment="规格型号（可为空）")
     status = Column(String(20), default=AssetStatus.IN_USE.value, nullable=False, comment="状态：在用或在库")
     available_status = Column(String(20), default=AssetAvailability.AVAILABLE.value, nullable=False, comment="可用状态：可用/维修中/已报废")
-    availability_status = Column(String(50), nullable=True, comment="可用状态：如可用/不可用/维修中等")
     mac_address = Column(String(50), nullable=True, comment="MAC地址")
     ip_address = Column(String(50), nullable=True, comment="IP地址")
     

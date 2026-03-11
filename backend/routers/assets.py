@@ -844,262 +844,249 @@ async def import_assets(
             row_data = row.to_dict()  # 保存原始行数据
             
             try:
-                # 单元格先转字符串（空/NaN→''，数字浮点去 .0），再按 DB 类型用
-                asset_number = cell_to_str(row.get('资产编号', ''))
-                category_name = cell_to_str(row.get('所属大类', ''))
-                name = cell_to_str(row.get('实物名称', ''))
-                # 行级必填校验（参考用户批量导入）
-                if not (asset_number and str(asset_number).strip()) or not (category_name and str(category_name).strip()) or not (name and str(name).strip()):
-                    error_count += 1
-                    error_msg = "资产编号、所属大类、实物名称为必填"
-                    errors.append(f"第{row_number}行：{error_msg}")
-                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
-                    continue
-                
-                # 按资产编号查库（含已逻辑删除），用于判断：未删除则比对冲突/跳过，已删除则恢复+更新
-                existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
-                
-                # 查找或创建资产大类
-                category = db.query(AssetCategory).filter(AssetCategory.name == category_name).first()
-                if not category:
-                    category = AssetCategory(name=category_name)
-                    db.add(category)
-                    db.flush()
-                
-                specification = row_cell_str(row, df.columns, '规格型号') or None
-                # 状态：优先读「实物状态」，若无则读「状态」；只允许在用/在库/库存备用
-                status_raw = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
-                if status_raw not in ('在用', '在库', '库存备用'):
-                    error_count += 1
-                    error_msg = f"状态必须是：在用、在库、库存备用，当前为「{status_raw}」"
-                    errors.append(f"第{row_number}行：{error_msg}")
-                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
-                    continue
-                status = '在库' if status_raw == '库存备用' else status_raw
-                available_status_raw = row_cell_str(row, df.columns, '可用状态') or '可用'
-                if available_status_raw not in ('可用', '维修中', '已报废'):
-                    available_status_raw = '可用'
-                available_status = available_status_raw
-                mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
-                ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
-                office_location = row_cell_str(row, df.columns, '存放办公地点') or None
-                floor = row_cell_str(row, df.columns, '具体存放楼层', '存放楼层') or None
-                seat_number = row_cell_str(row, df.columns, '座位号') or None
-                user_group = row_cell_str(row, df.columns, '使用人组别', '组別', '组别') or None
-                remark = row_cell_str(row, df.columns, '备注说明') or None
-                quantity = str_to_int(row_cell_str(row, df.columns, '件数'), default=None)
-                if quantity is not None and quantity < 1:
-                    quantity = 1
-                if quantity is None:
-                    quantity = 1
-                team = row_cell_str(row, df.columns, '所在团队') or None
-                purchase_date = cell_to_date(row.get('购置日期')) if '购置日期' in df.columns else None
-                card_number = row_cell_str(row, df.columns, '卡片编号') or None
-                computer_type = row_cell_str(row, df.columns, '电脑类型') or None
-                computer_usage = row_cell_str(row, df.columns, '电脑应用') or None
-                computer_name = row_cell_str(row, df.columns, '计算机名') or None
-                monitor1_model = row_cell_str(row, df.columns, '连接显示器1型号') or None
-                monitor1_asset_number = row_cell_str(row, df.columns, '连接显示器1资产编号') or None
-                monitor1_serial = row_cell_str(row, df.columns, '显示器1 序列号', '显示器1序列号') or None
-                monitor2_model = row_cell_str(row, df.columns, '连接显示器2', '连接显示器2型号') or None
-                monitor2_asset_number = row_cell_str(row, df.columns, '连接显示器2资产编号') or None
-                monitor2_serial = row_cell_str(row, df.columns, '显示器2序列号') or None
-                asset_contact = row_cell_str(row, df.columns, '资产管理联系人') or None
-                reserve_1 = row_cell_str(row, df.columns, '预留1') or None
-                reserve_2 = row_cell_str(row, df.columns, '预留2') or None
-                reserve_3 = row_cell_str(row, df.columns, '预留3') or None
-                reserve_4 = row_cell_str(row, df.columns, '预留4') or None
-                reserve_5 = row_cell_str(row, df.columns, '预留5') or None
-                reserve_6 = row_cell_str(row, df.columns, '预留6') or None
-                safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '检查执行人ID'), default=None)
-                safety_check_executor_name = row_cell_str(row, df.columns, '检查执行人') or None
-                if safety_check_executor_id is None and safety_check_executor_name:
-                    u = db.query(User).filter(
-                        User.real_name == safety_check_executor_name.strip(),
-                        User.deleted_at.is_(None)
-                    ).first()
-                    if u:
-                        safety_check_executor_id = u.id
-                
-                # 解析使用人（所有人）：优先所有人ID，否则所有人（姓名），否则使用人EHR号
-                user_id = str_to_int(row_cell_str(row, df.columns, '所有人ID'), default=None)
-                if user_id is not None:
-                    u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
-                    if not u:
-                        user_id = None
-                    elif not user_group:
-                        user_group = u.group
-                if user_id is None:
-                    owner_name = row_cell_str(row, df.columns, '所有人')
-                    if owner_name:
+                # 使用 Savepoint (嵌套事务) 确保单行失败不影响整体 (Bug 15 / B11)
+                with db.begin_nested():
+                    # 单元格先转字符串（空/NaN→''，数字浮点去 .0），再按 DB 类型用
+                    asset_number = cell_to_str(row.get('资产编号', ''))
+                    category_name = cell_to_str(row.get('所属大类', ''))
+                    name = cell_to_str(row.get('实物名称', ''))
+                    # 行级必填校验（参考用户批量导入）
+                    if not (asset_number and str(asset_number).strip()) or not (category_name and str(category_name).strip()) or not (name and str(name).strip()):
+                        raise ValueError("资产编号、所属大类、实物名称为必填")
+                    
+                    # 按资产编号查库（含已逻辑删除），用于判断：未删除则比对冲突/跳过，已删除则恢复+更新
+                    existing_any = db.query(Asset).filter(Asset.asset_number == asset_number).first()
+                    
+                    # 查找或创建资产大类
+                    category = db.query(AssetCategory).filter(AssetCategory.name == category_name).first()
+                    if not category:
+                        category = AssetCategory(name=category_name)
+                        db.add(category)
+                        db.flush()
+                    
+                    specification = row_cell_str(row, df.columns, '规格型号') or None
+                    # 状态：优先读「实物状态」，若无则读「状态」；只允许在用/在库/库存备用
+                    status_raw = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
+                    if status_raw not in ('在用', '在库', '库存备用'):
+                        raise ValueError(f"状态必须是：在用、在库、库存备用，当前为「{status_raw}」")
+                    
+                    status = '在库' if status_raw == '库存备用' else status_raw
+                    available_status_raw = row_cell_str(row, df.columns, '可用状态') or '可用'
+                    if available_status_raw not in ('可用', '维修中', '已报废'):
+                        available_status_raw = '可用'
+                    available_status = available_status_raw
+                    mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
+                    ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
+                    office_location = row_cell_str(row, df.columns, '存放办公地点') or None
+                    floor = row_cell_str(row, df.columns, '具体存放楼层', '存放楼层') or None
+                    seat_number = row_cell_str(row, df.columns, '座位号') or None
+                    user_group = row_cell_str(row, df.columns, '使用人组别', '组別', '组别') or None
+                    remark = row_cell_str(row, df.columns, '备注说明') or None
+                    quantity = str_to_int(row_cell_str(row, df.columns, '件数'), default=None)
+                    if quantity is not None and quantity < 1:
+                        quantity = 1
+                    if quantity is None:
+                        quantity = 1
+                    team = row_cell_str(row, df.columns, '所在团队') or None
+                    purchase_date = cell_to_date(row.get('购置日期')) if '购置日期' in df.columns else None
+                    card_number = row_cell_str(row, df.columns, '卡片编号') or None
+                    computer_type = row_cell_str(row, df.columns, '电脑类型') or None
+                    computer_usage = row_cell_str(row, df.columns, '电脑应用') or None
+                    computer_name = row_cell_str(row, df.columns, '计算机名') or None
+                    monitor1_model = row_cell_str(row, df.columns, '连接显示器1型号') or None
+                    monitor1_asset_number = row_cell_str(row, df.columns, '连接显示器1资产编号') or None
+                    monitor1_serial = row_cell_str(row, df.columns, '显示器1 序列号', '显示器1序列号') or None
+                    monitor2_model = row_cell_str(row, df.columns, '连接显示器2', '连接显示器2型号') or None
+                    monitor2_asset_number = row_cell_str(row, df.columns, '连接显示器2资产编号') or None
+                    monitor2_serial = row_cell_str(row, df.columns, '显示器2序列号') or None
+                    asset_contact = row_cell_str(row, df.columns, '资产管理联系人') or None
+                    reserve_1 = row_cell_str(row, df.columns, '预留1') or None
+                    reserve_2 = row_cell_str(row, df.columns, '预留2') or None
+                    reserve_3 = row_cell_str(row, df.columns, '预留3') or None
+                    reserve_4 = row_cell_str(row, df.columns, '预留4') or None
+                    reserve_5 = row_cell_str(row, df.columns, '预留5') or None
+                    reserve_6 = row_cell_str(row, df.columns, '预留6') or None
+                    safety_check_executor_id = str_to_int(row_cell_str(row, df.columns, '检查执行人ID'), default=None)
+                    safety_check_executor_name = row_cell_str(row, df.columns, '检查执行人') or None
+                    if safety_check_executor_id is None and safety_check_executor_name:
                         u = db.query(User).filter(
-                            User.real_name == owner_name.strip(),
+                            User.real_name == safety_check_executor_name.strip(),
                             User.deleted_at.is_(None)
                         ).first()
                         if u:
-                            user_id = u.id
-                            if not user_group:
-                                user_group = u.group
-                        else:
-                            error_count += 1
-                            error_msg = f"所有人「{owner_name}」未找到对应用户"
-                            errors.append(f"第{row_number}行：{error_msg}")
-                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
-                            continue
-                # 使用人可为管理员（管理员名下可有资产）
-                if user_id is None:
-                    user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
-                    if user_ehr:
-                        user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
-                        if user:
-                            user_id = user.id
-                            if not user_group:
-                                user_group = user.group
-                        else:
-                            error_count += 1
-                            error_msg = f"使用人EHR号{user_ehr}不存在"
-                            errors.append(f"第{row_number}行：{error_msg}")
-                            error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
-                            continue
-                
-                # 若仅修改了使用人且未显式指定执行人，则将执行人重置为新使用人
-                if user_id is not None and safety_check_executor_id is None and not safety_check_executor_name:
-                    u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
-                    if u:
-                        safety_check_executor_id = u.id
-                        safety_check_executor_name = u.real_name
-                
-                assigned_id = safety_check_executor_id or user_id
-                
-                # 已存在且未删除：比对差异，有差异则加入冲突列表供用户选择覆盖/保持
-                if existing_any and existing_any.deleted_at is None:
-                    parsed = {
-                        "category_id": category.id, "name": name, "specification": specification,
-                        "status": status, "available_status": available_status, "mac_address": mac_address, "ip_address": ip_address,
-                        "office_location": office_location, "floor": floor, "seat_number": seat_number,
-                        "user_id": user_id, "user_group": user_group, "remark": remark,
-                        "quantity": quantity, "team": team, "purchase_date": purchase_date,
-                        "card_number": card_number, "safety_check_executor_id": safety_check_executor_id,
-                        "safety_check_executor_name": safety_check_executor_name,
-                        "computer_type": computer_type, "computer_usage": computer_usage, "computer_name": computer_name,
-                        "monitor1_model": monitor1_model, "monitor1_asset_number": monitor1_asset_number, "monitor1_serial": monitor1_serial,
-                        "monitor2_model": monitor2_model, "monitor2_asset_number": monitor2_asset_number, "monitor2_serial": monitor2_serial,
-                        "asset_contact": asset_contact,
-                        "reserve_1": reserve_1, "reserve_2": reserve_2, "reserve_3": reserve_3,
-                        "reserve_4": reserve_4, "reserve_5": reserve_5, "reserve_6": reserve_6,
-                    }
-                    diffs = _build_import_conflict_diffs(existing_any, parsed, db)
-                    if not diffs:
-                        skip_count += 1
-                        continue
-                    conflict_count += 1
-                    conflict_details.append(ImportConflictDetail(
-                        row_number=row_number,
+                            safety_check_executor_id = u.id
+                    
+                    # 解析使用人（所有人）：优先所有人ID，否则所有人（姓名），否则使用人EHR号
+                    user_id = str_to_int(row_cell_str(row, df.columns, '所有人ID'), default=None)
+                    if user_id is not None:
+                        u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+                        if not u:
+                            user_id = None
+                        elif not user_group:
+                            user_group = u.group
+                    if user_id is None:
+                        owner_name = row_cell_str(row, df.columns, '所有人')
+                        if owner_name:
+                            u = db.query(User).filter(
+                                User.real_name == owner_name.strip(),
+                                User.deleted_at.is_(None)
+                            ).first()
+                            if u:
+                                user_id = u.id
+                                if not user_group:
+                                    user_group = u.group
+                            else:
+                                raise ValueError(f"所有人「{owner_name}」未找到对应用户")
+                    
+                    if user_id is None:
+                        user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
+                        if user_ehr:
+                            user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
+                            if user:
+                                user_id = user.id
+                                if not user_group:
+                                    user_group = user.group
+                            else:
+                                raise ValueError(f"使用人EHR号{user_ehr}不存在")
+                    
+                    # 若仅修改了使用人且未显式指定执行人，则将执行人重置为新使用人
+                    if user_id is not None and safety_check_executor_id is None and not safety_check_executor_name:
+                        u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+                        if u:
+                            safety_check_executor_id = u.id
+                            safety_check_executor_name = u.real_name
+                    
+                    assigned_id = safety_check_executor_id or user_id
+                    
+                    # 已存在且未删除：比对差异，有差异则加入冲突列表供用户选择覆盖/保持
+                    if existing_any and existing_any.deleted_at is None:
+                        parsed = {
+                            "category_id": category.id, "name": name, "specification": specification,
+                            "status": status, "available_status": available_status, "mac_address": mac_address, "ip_address": ip_address,
+                            "office_location": office_location, "floor": floor, "seat_number": seat_number,
+                            "user_id": user_id, "user_group": user_group, "remark": remark,
+                            "quantity": quantity, "team": team, "purchase_date": purchase_date,
+                            "card_number": card_number, "safety_check_executor_id": safety_check_executor_id,
+                            "safety_check_executor_name": safety_check_executor_name,
+                            "computer_type": computer_type, "computer_usage": computer_usage, "computer_name": computer_name,
+                            "monitor1_model": monitor1_model, "monitor1_asset_number": monitor1_asset_number, "monitor1_serial": monitor1_serial,
+                            "monitor2_model": monitor2_model, "monitor2_asset_number": monitor2_asset_number, "monitor2_serial": monitor2_serial,
+                            "asset_contact": asset_contact,
+                            "reserve_1": reserve_1, "reserve_2": reserve_2, "reserve_3": reserve_3,
+                            "reserve_4": reserve_4, "reserve_5": reserve_5, "reserve_6": reserve_6,
+                        }
+                        diffs = _build_import_conflict_diffs(existing_any, parsed, db)
+                        if not diffs:
+                            skip_count += 1
+                            return # 这里跳出 begin_nested，继续下一行
+                        conflict_count += 1
+                        conflict_details.append(ImportConflictDetail(
+                            row_number=row_number,
+                            asset_number=asset_number,
+                            asset_id=existing_any.id,
+                            diffs=diffs,
+                            row_data=row_to_error_dict(row_data),
+                        ))
+                        return # 继续下一行
+                    
+                    if existing_any and existing_any.deleted_at is not None:
+                        # 存在且已逻辑删除：恢复并更新该行，不插入
+                        existing_any.deleted_at = None
+                        existing_any.deleted_by_id = None
+                        existing_any.category_id = category.id
+                        existing_any.name = name
+                        existing_any.specification = specification or None
+                        existing_any.status = status
+                        existing_any.available_status = available_status
+                        existing_any.mac_address = mac_address or None
+                        existing_any.ip_address = ip_address or None
+                        existing_any.office_location = office_location or None
+                        existing_any.floor = floor or None
+                        existing_any.seat_number = seat_number or None
+                        existing_any.user_id = user_id
+                        existing_any.user_group = user_group or None
+                        existing_any.remark = remark or None
+                        existing_any.quantity = quantity
+                        existing_any.team = team
+                        existing_any.purchase_date = purchase_date
+                        existing_any.card_number = card_number
+                        existing_any.safety_check_executor_id = safety_check_executor_id
+                        existing_any.safety_check_executor_name = safety_check_executor_name
+                        existing_any.computer_type = computer_type
+                        existing_any.computer_usage = computer_usage
+                        existing_any.computer_name = computer_name
+                        existing_any.monitor1_model = monitor1_model
+                        existing_any.monitor1_asset_number = monitor1_asset_number
+                        existing_any.monitor1_serial = monitor1_serial
+                        existing_any.monitor2_model = monitor2_model
+                        existing_any.monitor2_asset_number = monitor2_asset_number
+                        existing_any.monitor2_serial = monitor2_serial
+                        existing_any.asset_contact = asset_contact
+                        existing_any.reserve_1 = reserve_1
+                        existing_any.reserve_2 = reserve_2
+                        existing_any.reserve_3 = reserve_3
+                        existing_any.reserve_4 = reserve_4
+                        existing_any.reserve_5 = reserve_5
+                        existing_any.reserve_6 = reserve_6
+                        db.flush()
+                        if assigned_id:
+                            try:
+                                create_system_allocated_task(db=db, asset_id=existing_any.id, assigned_user_id=assigned_id, source="inbound")
+                            except Exception as e:
+                                logger.error(f"批量导入恢复资产时触发系统安检任务下发失败: {e}", exc_info=True)
+                        success_count += 1
+                        return # 继续下一行
+                    
+                    # 不存在：新增
+                    db_asset = Asset(
                         asset_number=asset_number,
-                        asset_id=existing_any.id,
-                        diffs=diffs,
-                        row_data=row_to_error_dict(row_data),
-                    ))
-                    continue
-                
-                if existing_any and existing_any.deleted_at is not None:
-                    # 存在且已逻辑删除：恢复并更新该行，不插入
-                    existing_any.deleted_at = None
-                    existing_any.deleted_by_id = None
-                    existing_any.category_id = category.id
-                    existing_any.name = name
-                    existing_any.specification = specification or None
-                    existing_any.status = status
-                    existing_any.available_status = available_status
-                    existing_any.mac_address = mac_address or None
-                    existing_any.ip_address = ip_address or None
-                    existing_any.office_location = office_location or None
-                    existing_any.floor = floor or None
-                    existing_any.seat_number = seat_number or None
-                    existing_any.user_id = user_id
-                    existing_any.user_group = user_group or None
-                    existing_any.remark = remark or None
-                    existing_any.quantity = quantity
-                    existing_any.team = team
-                    existing_any.purchase_date = purchase_date
-                    existing_any.card_number = card_number
-                    existing_any.safety_check_executor_id = safety_check_executor_id
-                    existing_any.safety_check_executor_name = safety_check_executor_name
-                    existing_any.computer_type = computer_type
-                    existing_any.computer_usage = computer_usage
-                    existing_any.computer_name = computer_name
-                    existing_any.monitor1_model = monitor1_model
-                    existing_any.monitor1_asset_number = monitor1_asset_number
-                    existing_any.monitor1_serial = monitor1_serial
-                    existing_any.monitor2_model = monitor2_model
-                    existing_any.monitor2_asset_number = monitor2_asset_number
-                    existing_any.monitor2_serial = monitor2_serial
-                    existing_any.asset_contact = asset_contact
-                    existing_any.reserve_1 = reserve_1
-                    existing_any.reserve_2 = reserve_2
-                    existing_any.reserve_3 = reserve_3
-                    existing_any.reserve_4 = reserve_4
-                    existing_any.reserve_5 = reserve_5
-                    existing_any.reserve_6 = reserve_6
+                        category_id=category.id,
+                        name=name,
+                        specification=specification or None,
+                        status=status,
+                        available_status=available_status,
+                        mac_address=mac_address or None,
+                        ip_address=ip_address or None,
+                        office_location=office_location or None,
+                        floor=floor or None,
+                        seat_number=seat_number or None,
+                        user_id=user_id,
+                        user_group=user_group or None,
+                        remark=remark or None,
+                        quantity=quantity,
+                        team=team,
+                        purchase_date=purchase_date,
+                        card_number=card_number,
+                        safety_check_executor_id=safety_check_executor_id,
+                        safety_check_executor_name=safety_check_executor_name,
+                        computer_type=computer_type,
+                        computer_usage=computer_usage,
+                        computer_name=computer_name,
+                        monitor1_model=monitor1_model,
+                        monitor1_asset_number=monitor1_asset_number,
+                        monitor1_serial=monitor1_serial,
+                        monitor2_model=monitor2_model,
+                        monitor2_asset_number=monitor2_asset_number,
+                        monitor2_serial=monitor2_serial,
+                        asset_contact=asset_contact,
+                        reserve_1=reserve_1,
+                        reserve_2=reserve_2,
+                        reserve_3=reserve_3,
+                        reserve_4=reserve_4,
+                        reserve_5=reserve_5,
+                        reserve_6=reserve_6,
+                    )
+                    db.add(db_asset)
                     db.flush()
                     if assigned_id:
                         try:
-                            create_system_allocated_task(db=db, asset_id=existing_any.id, assigned_user_id=assigned_id, source="inbound")
+                            create_system_allocated_task(db=db, asset_id=db_asset.id, assigned_user_id=assigned_id, source="inbound")
                         except Exception as e:
-                            logger.error(f"批量导入恢复资产时触发系统安检任务下发失败: {e}", exc_info=True)
+                            logger.error(f"批量导入时触发系统安检任务下发失败: {e}", exc_info=True)
                     success_count += 1
-                    continue
-                
-                # 不存在：新增
-                db_asset = Asset(
-                    asset_number=asset_number,
-                    category_id=category.id,
-                    name=name,
-                    specification=specification or None,
-                    status=status,
-                    available_status=available_status,
-                    mac_address=mac_address or None,
-                    ip_address=ip_address or None,
-                    office_location=office_location or None,
-                    floor=floor or None,
-                    seat_number=seat_number or None,
-                    user_id=user_id,
-                    user_group=user_group or None,
-                    remark=remark or None,
-                    quantity=quantity,
-                    team=team,
-                    purchase_date=purchase_date,
-                    card_number=card_number,
-                    safety_check_executor_id=safety_check_executor_id,
-                    safety_check_executor_name=safety_check_executor_name,
-                    computer_type=computer_type,
-                    computer_usage=computer_usage,
-                    computer_name=computer_name,
-                    monitor1_model=monitor1_model,
-                    monitor1_asset_number=monitor1_asset_number,
-                    monitor1_serial=monitor1_serial,
-                    monitor2_model=monitor2_model,
-                    monitor2_asset_number=monitor2_asset_number,
-                    monitor2_serial=monitor2_serial,
-                    asset_contact=asset_contact,
-                    reserve_1=reserve_1,
-                    reserve_2=reserve_2,
-                    reserve_3=reserve_3,
-                    reserve_4=reserve_4,
-                    reserve_5=reserve_5,
-                    reserve_6=reserve_6,
-                )
-                db.add(db_asset)
-                db.flush()
-                if assigned_id:
-                    try:
-                        create_system_allocated_task(db=db, asset_id=db_asset.id, assigned_user_id=assigned_id, source="inbound")
-                    except Exception as e:
-                        logger.error(f"批量导入时触发系统安检任务下发失败: {e}", exc_info=True)
-                success_count += 1
-                
+            
             except Exception as e:
-                db.rollback() # 重要：发生冲突（如数据库已有重号）时必须回滚，否则Session会失效无法处理后续行
+                # 注：begin_nested() 这里的异常会自动回滚子事务（这一行）
                 error_count += 1
                 error_msg = str(e)
                 errors.append(f"第{row_number}行：{error_msg}")

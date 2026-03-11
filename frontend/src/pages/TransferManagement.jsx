@@ -89,7 +89,7 @@ const TransferManagement = () => {
       const response = await api.get('/users/', { params: { limit: 10000 } })
       setUsers(response.data || [])
       const options = (response.data || []).map(user => ({
-        label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
+        label: `${user.real_name} (EHR号：${user.ehr_number}) - ${user.group || '未分组'}`,
         value: user.id,
         ehrNumber: user.ehr_number
       }))
@@ -182,20 +182,23 @@ const TransferManagement = () => {
       pending: { color: '#faad14', text: '待审批', icon: '⏰' },
       approved: { color: '#52c41a', text: '已批准', icon: '✓' },
       rejected: { color: '#722ed1', text: '已拒绝', icon: '✗' },
-      confirmation_rejected: { color: '#ff4d4f', text: '转入人已拒绝', icon: '✗' }
+      confirmation_rejected: { color: '#ff4d4f', text: '转入人已拒绝', icon: '✗' },
+      pending_linked_safety: { color: '#fa8c16', text: '待完成联动安全检查', icon: '🔒' }
     }
     const statusInfo = statusMap[status] || { color: '#d9d9d9', text: status || '未知', icon: '' }
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', maxWidth: 160 }}>
         <Tag
-          color={statusInfo.color}
           style={{
             marginBottom: 4,
             whiteSpace: 'normal',
             wordBreak: 'break-word',
             padding: '2px 8px',
-            lineHeight: 1.4
+            lineHeight: 1.4,
+            border: `1px solid ${statusInfo.color}`,
+            background: `${statusInfo.color}0d`,
+            color: statusInfo.color
           }}
         >
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -219,12 +222,12 @@ const TransferManagement = () => {
       key: 'asset_name'
     },
     {
-      title: '转出人',
+      title: '转出人（姓名）',
       dataIndex: ['from_user', 'real_name'],
       key: 'from_user'
     },
     {
-      title: '转入人',
+      title: '转入人（姓名）',
       dataIndex: ['to_user', 'real_name'],
       key: 'to_user'
     },
@@ -239,7 +242,7 @@ const TransferManagement = () => {
       dataIndex: 'status',
       key: 'status',
       width: 180,
-      render: getStatusTag
+      render: (_, record) => getStatusTag(record.pending_linked_safety_check ? 'pending_linked_safety' : record.status)
     },
     {
       title: '转入人意见',

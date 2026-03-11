@@ -9,7 +9,7 @@ from typing import List, Optional
 from database import get_db
 from models import Asset, AssetCategory, User, TaskAsset
 from schemas import (
-    AssetCreate, AssetUpdate, AssetResponse, ImportResponse,
+    AssetCreate, AssetUpdate, AssetResponse, AssetUpdateResponse, ImportResponse,
     ImportConflictDetail, ImportConflictDiff, ImportResolveRequest,
 )
 from auth import get_current_user, get_current_admin_user
@@ -475,7 +475,7 @@ async def create_asset(
     return AssetResponse.model_validate(db_asset)
 
 
-@router.put("/{asset_id}", response_model=AssetResponse)
+@router.put("/{asset_id}", response_model=AssetUpdateResponse)
 async def update_asset(
     asset_id: int,
     asset_data: AssetUpdate,
@@ -669,7 +669,8 @@ async def update_asset(
             setattr(asset, field, value)
             changed_fields.append(field)
             
-    # 【新增：延迟调用和安检派发】
+    # 【新增：延迟调用和安检派发】仅修改使用人时联动；仅修改使用人组别不联动
+    triggered_safety_check = False
     old_user_id = old_values.get("user_id")
     if is_reallocation:
         from models import PendingReallocation
@@ -685,6 +686,7 @@ async def update_asset(
                     source="reallocation"
                 )
                 if task:
+                    triggered_safety_check = True
                     pending = PendingReallocation(
                         asset_id=asset.id,
                         new_user_id=new_user_id,
@@ -744,7 +746,8 @@ async def update_asset(
     
     db.commit()
     db.refresh(asset)
-    return AssetResponse.model_validate(asset)
+    resp = AssetResponse.model_validate(asset)
+    return AssetUpdateResponse(**(resp.model_dump()), triggered_safety_check=triggered_safety_check)
 
 
 @router.delete("/{asset_id}")

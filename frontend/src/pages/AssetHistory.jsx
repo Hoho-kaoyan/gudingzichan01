@@ -142,8 +142,8 @@ const AssetHistory = () => {
         <div>{content}</div>
         {details}
         <div style={{ marginTop: 8, fontSize: '12px', color: '#999' }}>
-          {item.operator && `操作人: ${item.operator.real_name} (${item.operator.ehr_number})`}
-          {item.approver && ` | 审批人: ${item.approver.real_name} (${item.approver.ehr_number})`}
+          {item.operator && `操作人: ${item.operator.real_name} (EHR号：${item.operator.ehr_number})`}
+          {item.approver && ` | 审批人: ${item.approver.real_name} (EHR号：${item.approver.ehr_number})`}
         </div>
       </div>
     )

@@ -77,7 +77,7 @@ const ReturnManagement = () => {
       const response = await api.get('/users/', { params: { limit: 10000 } })
       setUsers(response.data || [])
       const options = (response.data || []).map(user => ({
-        label: `${user.real_name} (${user.ehr_number}) - ${user.group || '未分组'}`,
+        label: `${user.real_name} (EHR号：${user.ehr_number}) - ${user.group || '未分组'}`,
         value: user.id,
         ehrNumber: user.ehr_number
       }))

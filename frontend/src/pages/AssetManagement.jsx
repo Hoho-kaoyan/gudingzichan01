@@ -43,6 +43,8 @@ const ASSET_FORM_FIELDS = [
   // 预留1～6 仅用于导入/后端，不在查看与新建/编辑中展示
 ]
 
+const EHR_LABEL_STYLE = { fontSize: '12px', fontWeight: 400 }
+
 const AssetManagement = () => {
   const { user: currentUser, isAdmin, isLeader, isAdminOrLeader } = useAuth()
   const navigate = useNavigate()
@@ -231,6 +233,9 @@ const AssetManagement = () => {
               await fetchEditRequests()
             }
             return
+          }
+          if (response.data && response.data.triggered_safety_check) {
+            message.success('已发布检查任务')
           } else {
             message.success('更新成功')
           }
@@ -488,7 +493,7 @@ const AssetManagement = () => {
         dataIndex: ['user', 'real_name'],
         key: 'user',
         width: 80,
-        render: (_, record) => record.user ? `${record.user.real_name} (${record.user.ehr_number})` : '在库'
+        render: (_, record) => record.user ? <>{record.user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{record.user.ehr_number}</span>)</> : '在库'
       },
       {
         title: '组别',
@@ -785,12 +790,35 @@ const AssetManagement = () => {
                 ? users.filter(u => u.group === currentUser?.group)
                 : users
               return (
-                <Form.Item key={field.name} label={label} name={field.name}>
+                <Form.Item
+                  key={field.name}
+                  label={label}
+                  name={field.name}
+                  extra={isUserId ? '修改使用人将触发安全检查，检查完成后变更才会生效。' : undefined}
+                >
                   <Select
                     allowClear
                     disabled={disabled}
                     placeholder={isUserId && isLeader ? '请选择本组人员' : `请选择${field.label}`}
                     showSearch
+                    onChange={isUserId ? (value) => {
+                      if (value != null) {
+                        const user = users.find(u => u.id === value)
+                        if (user) {
+                          form.setFieldsValue({
+                            user_group: user.group ?? undefined,
+                            safety_check_executor_id: user.id,
+                            safety_check_executor_name: user.real_name ?? undefined
+                          })
+                        }
+                      } else {
+                        form.setFieldsValue({
+                          user_group: undefined,
+                          safety_check_executor_id: undefined,
+                          safety_check_executor_name: undefined
+                        })
+                      }
+                    } : undefined}
                     filterOption={(input, option) => {
                       const user = users.find(u => u.id === option.value)
                       const searchStr = `${user?.real_name || ''}${user?.ehr_number || ''}`.toLowerCase()
@@ -799,7 +827,7 @@ const AssetManagement = () => {
                   >
                     {filteredUsers.map(user => (
                       <Select.Option key={user.id} value={user.id}>
-                        {user.real_name} ({user.ehr_number}) - {user.group}
+                        {user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{user.ehr_number}</span>) - {user.group}
                       </Select.Option>
                     ))}
                   </Select>
@@ -861,26 +889,34 @@ const AssetManagement = () => {
           <Descriptions bordered column={2} size="small">
             {ASSET_FORM_FIELDS.map((field) => {
               let value = currentAssetDetail[field.name]
+              let content
               if (field.type === 'select_category') {
                 value = currentAssetDetail.category?.name
+                content = value !== undefined && value !== null && value !== '' ? String(value) : '-'
               } else if (field.name === 'user_id') {
-                value = currentAssetDetail.user?.real_name
-                  ? `${currentAssetDetail.user.real_name} (${currentAssetDetail.user.ehr_number})`
-                  : '在库'
+                if (currentAssetDetail.user?.real_name) {
+                  content = <>{currentAssetDetail.user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{currentAssetDetail.user.ehr_number}</span>)</>
+                } else {
+                  content = '在库'
+                }
               } else if (field.name === 'safety_check_executor_id') {
                 const exec = currentAssetDetail.safety_check_executor
-                value = exec?.real_name
-                  ? `${exec.real_name} (${exec.ehr_number})`
-                  : (currentAssetDetail.safety_check_executor_name || null)
-              } else if (field.type === 'date' && value) {
-                value = dayjs(value).format('YYYY-MM-DD')
-              } else if (field.name === 'status') {
-                value = (value === '库存备用' || value === '在库') ? '在库' : value
+                if (exec?.real_name) {
+                  content = <>{exec.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{exec.ehr_number}</span>)</>
+                } else {
+                  content = currentAssetDetail.safety_check_executor_name || '-'
+                }
+              } else {
+                if (field.type === 'date' && value) {
+                  value = dayjs(value).format('YYYY-MM-DD')
+                } else if (field.name === 'status') {
+                  value = (value === '库存备用' || value === '在库') ? '在库' : value
+                }
+                content = value !== undefined && value !== null && value !== '' ? String(value) : '-'
               }
-              const display = value !== undefined && value !== null && value !== '' ? String(value) : '-'
               return (
                 <Descriptions.Item key={field.name} label={field.label} span={field.type === 'textarea' ? 2 : 1}>
-                  {display}
+                  {content}
                 </Descriptions.Item>
               )
             })}
@@ -932,7 +968,7 @@ const AssetManagement = () => {
               {currentEditRequest.approver && (
                 <>
                   <Descriptions.Item label="审批人">
-                    {currentEditRequest.approver.real_name} ({currentEditRequest.approver.ehr_number})
+                    {currentEditRequest.approver.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{currentEditRequest.approver.ehr_number}</span>)
                   </Descriptions.Item>
                   <Descriptions.Item label="审批时间">
                     {currentEditRequest.approved_at ? dayjs(currentEditRequest.approved_at).format('YYYY-MM-DD HH:mm:ss') : '-'}
@@ -976,7 +1012,7 @@ const AssetManagement = () => {
                     } else if (key === 'user_id' && value) {
                       // 查找用户名称
                       const user = users.find(u => u.id === value)
-                      displayValue = user ? `${user.real_name} (${user.ehr_number})` : value
+                      displayValue = user ? <>{user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{user.ehr_number}</span>)</> : value
                     } else if (value === null || value === '') {
                       displayValue = '(清空)'
                     } else {

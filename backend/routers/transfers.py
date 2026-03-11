@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import TransferRequest, Asset, User
+from models import TransferRequest, Asset, User, SafetyCheckTask
 from schemas import TransferRequestCreate, TransferRequestResponse, TransferConfirmationRequest
 from auth import get_current_user
 from logger import logger
@@ -49,6 +49,23 @@ def check_any_unfinished_tasks_for_user(db: Session, user_id: int):
             status_code=400, 
             detail="您有未完成的数据安检要求，请先处理后重试"
         )
+
+
+def _pending_linked_safety_check(db: Session, req: TransferRequest) -> bool:
+    """若该交接单关联的联动安检任务存在且未完成（pending/overdue），返回 True"""
+    task_id = getattr(req, "linked_safety_task_id", None)
+    if not task_id:
+        return False
+    task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == task_id).first()
+    return bool(task and task.status in ("pending", "overdue"))
+
+
+def _build_transfer_response(db: Session, req: TransferRequest) -> TransferRequestResponse:
+    """构建交接单响应（含 pending_linked_safety_check）"""
+    data = TransferRequestResponse.model_validate(req).model_dump()
+    data["pending_linked_safety_check"] = _pending_linked_safety_check(db, req)
+    return TransferRequestResponse(**data)
+
 
 router = APIRouter()
 
@@ -136,7 +153,7 @@ async def get_transfer_requests(
         joinedload(TransferRequest.to_user),
         joinedload(TransferRequest.approver)
     ).order_by(TransferRequest.created_at.desc()).offset(skip).limit(limit).all()
-    return [TransferRequestResponse.model_validate(req) for req in requests]
+    return [_build_transfer_response(db, req) for req in requests]
 
 
 @router.get("/{request_id}", response_model=TransferRequestResponse)
@@ -155,7 +172,7 @@ async def get_transfer_request(
         if request.from_user_id != current_user.id and request.to_user_id != current_user.id:
             raise HTTPException(status_code=403, detail="无权查看此申请")
     
-    return TransferRequestResponse.model_validate(request)
+    return _build_transfer_response(db, request)
 
 
 @router.post("/", response_model=TransferRequestResponse)
@@ -232,12 +249,14 @@ async def create_transfer_request(
     try:
         from safety_check_linkage import create_system_allocated_task
         assigned_id = getattr(asset, "safety_check_executor_id", None) or from_user_id
-        create_system_allocated_task(
+        task = create_system_allocated_task(
             db=db,
             asset_id=asset.id,
             assigned_user_id=assigned_id,
             source="transfer"
         )
+        if task:
+            db_request.linked_safety_task_id = task.id
     except Exception as e:
         logger.error(f"下发交接核验任务失败: {e}", exc_info=True)
 
@@ -260,7 +279,7 @@ async def create_transfer_request(
     
     db.commit()
     db.refresh(db_request)
-    return TransferRequestResponse.model_validate(db_request)
+    return _build_transfer_response(db, db_request)
 
 
 @router.delete("/{request_id}")
@@ -290,6 +309,14 @@ async def cancel_transfer_request(
     
     asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
     logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 撤回资产交接申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+    
+    # 【B5】若存在联动下发的安检任务，先将其置为已取消，再删除交接单
+    linked_task_id = getattr(request, "linked_safety_task_id", None)
+    if linked_task_id:
+        linked_task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == linked_task_id).first()
+        if linked_task and linked_task.status in ("pending", "overdue"):
+            linked_task.status = "cancelled"
+            logger.info(f"撤回交接时同步取消联动安检任务: task_id={linked_task_id}")
     
     # 记录撤回历史
     try:
@@ -374,4 +401,4 @@ async def confirm_transfer_request(
     
     db.commit()
     db.refresh(request)
-    return TransferRequestResponse.model_validate(request)
+    return _build_transfer_response(db, request)

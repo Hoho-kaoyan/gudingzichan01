@@ -539,7 +539,7 @@ const UserManagement = () => {
           />
           {resigningUser && (
             <div style={{ marginBottom: 16 }}>
-              <p><strong>用户：</strong>{resigningUser.real_name}（{resigningUser.ehr_number}）</p>
+              <p><strong>用户：</strong>{resigningUser.real_name}（<span style={{ fontSize: '12px', fontWeight: 400 }}>EHR号：{resigningUser.ehr_number}</span>）</p>
               <p><strong>名下资产数量：</strong>{userAssetCount}个</p>
             </div>
           )}

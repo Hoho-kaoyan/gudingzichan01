@@ -154,6 +154,7 @@ class TransferRequest(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     approved_at = Column(DateTime(timezone=True), nullable=True, comment="审批时间")
+    linked_safety_task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=True, comment="创建交接时联动下发的安全检查任务ID")
     
     # 关系
     asset = relationship("Asset")

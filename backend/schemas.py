@@ -204,6 +204,11 @@ class AssetResponse(AssetBase):
         from_attributes = True
 
 
+class AssetUpdateResponse(AssetResponse):
+    """资产更新接口专用：在资产对象基础上增加是否触发了安全检查任务的标识（仅修改使用人且成功创建任务时为 True）"""
+    triggered_safety_check: bool = False
+
+
 # 交接申请模式
 class TransferRequestCreate(BaseModel):
     asset_id: int = Field(..., description="资产ID")
@@ -233,6 +238,8 @@ class TransferRequestResponse(BaseModel):
     created_at: East8Datetime
     updated_at: Optional[East8Datetime] = None
     approved_at: Optional[East8Datetime] = None
+    linked_safety_task_id: Optional[int] = None
+    pending_linked_safety_check: bool = False  # 是否存在未完成的联动安检任务（由接口根据 linked 任务状态计算）
     asset: Optional[AssetResponse] = None
     from_user: Optional[UserResponse] = None
     to_user: Optional[UserResponse] = None

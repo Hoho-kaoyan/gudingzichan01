@@ -547,7 +547,7 @@ const ApprovalManagement = () => {
                         } else if (key === 'user_id' && value) {
                           // 查找用户名称
                           const user = users.find(u => u.id === value)
-                          displayValue = user ? `${user.real_name} (${user.ehr_number})` : value
+                          displayValue = user ? <>{user.real_name} (<span style={{ fontSize: '12px', fontWeight: 400 }}>EHR号：{user.ehr_number}</span>)</> : value
                         } else if (value === null || value === '') {
                           displayValue = '(清空)'
                         } else {

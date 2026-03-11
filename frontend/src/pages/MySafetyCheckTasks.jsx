@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react'
-import { Card, Button, Tabs, Table, Modal, Form, Radio, Input, message, Space, Tag, Steps } from 'antd'
-import { CheckCircleOutlined, ClockCircleOutlined, EyeOutlined } from '@ant-design/icons'
+import { Card, Button, Tabs, Row, Col, Modal, Form, Radio, Input, message, Space, Tag, Steps } from 'antd'
+import {
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  EyeOutlined,
+  FileTextOutlined,
+  SafetyCertificateOutlined,
+  UnorderedListOutlined,
+  CalendarOutlined,
+  PlayCircleOutlined
+} from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
@@ -205,36 +214,30 @@ const MySafetyCheckTasks = () => {
     }
   ]
 
+  // 方案二：大卡片 + 明确信息层级（2~3 列网格，顶部标题+状态，中部信息+图标，底部操作）
   const renderTaskCard = (task) => {
     const isPending = task.pending_count > 0
     const isOverdue = task.deadline && dayjs(task.deadline).isBefore(dayjs())
 
     return (
-      <Card
-        key={task.task_id}
-        style={{ marginBottom: 16 }}
-        actions={[
-          <Button
-            type="link"
-            icon={<EyeOutlined />}
-            onClick={() => handleStartCheck(task.task_id)}
-          >
-            查看详情
-          </Button>,
-          isPending && (
-            <Button
-              type="primary"
-              onClick={() => handleStartCheck(task.task_id)}
-            >
-              开始检查
-            </Button>
-          )
-        ].filter(Boolean)}
-      >
-        <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <h3>{task.task_title}</h3>
-            <Space>
+      <Col key={task.task_id} xs={24} sm={24} md={12} lg={8} style={{ marginBottom: 20 }}>
+        <Card
+          className="my-safety-check-task-card"
+          style={{
+            height: '100%',
+            borderRadius: 8,
+            boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
+            border: '1px solid #f0f0f0',
+            transition: 'box-shadow 0.2s ease, border-color 0.2s ease'
+          }}
+          bodyStyle={{ padding: 20, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 260 }}
+        >
+          {/* 顶部：任务标题 + 状态 */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexShrink: 0 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: 1.4, flex: 1, paddingRight: 8 }}>
+              {task.task_title}
+            </h3>
+            <Space size={4} wrap>
               {isOverdue && <Tag color="error">已逾期</Tag>}
               {isPending ? (
                 <Tag color="processing">待检查</Tag>
@@ -243,14 +246,62 @@ const MySafetyCheckTasks = () => {
               )}
             </Space>
           </div>
-          <p><strong>任务编号:</strong> {task.task_number}</p>
-          <p><strong>检查类型:</strong> {task.check_type?.name || '-'}</p>
-          <p><strong>待检查:</strong> {task.pending_count}项</p>
-          {task.deadline && (
-            <p><strong>截止时间:</strong> {dayjs(task.deadline).format('YYYY-MM-DD HH:mm')}</p>
-          )}
-        </div>
-      </Card>
+
+          {/* 中部：任务编号、检查类型、待检查数、截止时间（带图标） */}
+          <div style={{ flex: 1, marginBottom: 16 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
+              <FileTextOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
+              <span>任务编号：{task.task_number}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
+              <SafetyCertificateOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
+              <span>检查类型：{task.check_type?.name || '-'}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
+              <UnorderedListOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
+              <span>待检查：{task.pending_count} 项</span>
+            </div>
+            {task.deadline && (
+              <div style={{ display: 'flex', alignItems: 'center', color: '#595959', fontSize: 13 }}>
+                <CalendarOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
+                <span>截止时间：{dayjs(task.deadline).format('YYYY-MM-DD HH:mm')}</span>
+              </div>
+            )}
+          </div>
+
+          {/* 底部：主操作按钮（两边对齐） */}
+          <div
+            style={{
+              borderTop: '1px solid #f0f0f0',
+              paddingTop: 16,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexShrink: 0
+            }}
+          >
+            <Button
+              icon={<EyeOutlined />}
+              onClick={() => handleStartCheck(task.task_id)}
+              style={{ borderRadius: 6 }}
+            >
+              查看详情
+            </Button>
+            {isPending ? (
+              <Button
+                type="primary"
+                icon={<PlayCircleOutlined />}
+                onClick={() => handleStartCheck(task.task_id)}
+                style={{ borderRadius: 6 }}
+              >
+                开始检查
+              </Button>
+            ) : (
+              <span />
+            )}
+          </div>
+        </Card>
+      </Col>
     )
   }
 
@@ -261,6 +312,12 @@ const MySafetyCheckTasks = () => {
 
   return (
     <div>
+      <style>{`
+        .my-safety-check-task-card:hover {
+          box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+          border-color: #d9d9d9 !important;
+        }
+      `}</style>
       <h2>我的安全检查任务</h2>
 
       <Tabs
@@ -270,7 +327,7 @@ const MySafetyCheckTasks = () => {
         style={{ marginTop: 16 }}
       />
 
-      <div>
+      <div style={{ marginTop: 16 }}>
         {displayedTasks.length === 0 ? (
           <Card>
             <div style={{ textAlign: 'center', padding: 40 }}>
@@ -278,7 +335,9 @@ const MySafetyCheckTasks = () => {
             </div>
           </Card>
         ) : (
-          displayedTasks.map(task => renderTaskCard(task))
+          <Row gutter={[20, 20]}>
+            {displayedTasks.map(task => renderTaskCard(task))}
+          </Row>
         )}
       </div>
 

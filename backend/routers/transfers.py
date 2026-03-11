@@ -208,7 +208,7 @@ async def create_transfer_request(
     
     # 检查权限：
     # 1. 管理员：可以代任何人发起
-    # 2. 组长：只能为本组员发起，且接收人也必须是本组成员（满足用户“调拨按钮与范围限定本组”要求）
+    # 2. 组长：交接自己名下资产时与普通用户一致，可转给所有用户（含管理员）；交接组内他人资产时，接收人须为本组成员
     # 3. 普通用户：只能为自己发起
     if current_user.role == "admin":
         pass 
@@ -216,9 +216,10 @@ async def create_transfer_request(
         # 验证转出资产是否属于本组
         if asset.user_group != current_user.group:
             raise HTTPException(status_code=403, detail="组长只能交接本组关联的资产")
-        # 验证接收人是否属于本组
-        if to_user.group != current_user.group:
-            raise HTTPException(status_code=403, detail="组长只能将资产交接给本组人员")
+        # 组长交接自己名下资产：与普通用户一致，可转给任何人（含管理员）；交接组内他人资产时，接收人须为本组
+        if asset.user_id != current_user.id:
+            if to_user.group != current_user.group:
+                raise HTTPException(status_code=403, detail="组长只能将资产交接给本组人员")
     else:
         # 普通用户只能交接自己的资产
         if asset.user_id != current_user.id:

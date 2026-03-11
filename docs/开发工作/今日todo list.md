@@ -30,15 +30,15 @@
 7. **【已修复】** 发起交接任务，如果联动发起了检查任务，那么交接任务状态应为“待完成联动安全检查”（B4：linked_safety_task_id + pending_linked_safety_check）
 8. **【已修复】** 撤回交接任务应该能同时撤回因发起交接任务而联动发起的检查任务。（B5：撤回时取消联动 SafetyCheckTask）
 9. **安全检查任务在某些情况下没有红点提示**：当前逻辑下管理员不显示「我的安全检查任务」红点（TransferContext 中 role===admin 时待检查数置 0）；与需求 1 一致，应改为管理员也拉取并显示待检查数。见上方实现顺序中 Bug 9 说明。
-
 10. **【已修复】returns.py 缺少 logger 导入**：记录退回历史失败时会报 `NameError: name 'logger' is not defined`，已补 `from logger import logger`。
 11. **退库审批使用人置空时未同步清空执行人**：approvals.py 审批退回时，情况2/3（使用人置空、退回在库）只置空了 `user_id`/`user_group`，未置空 `safety_check_executor_id`/`safety_check_executor_name`，与「改使用人时同步改执行人」规则不一致。
 12. **审批交接禁止转入人为管理员**：approvals.py 中 to_user.role == "admin" 会直接拒绝，与需求 1（管理员名下可有资产）可能冲突，需确认业务上是否允许交接给管理员。
-13. **任务编号并发竞态**：safety_check_tasks 的 generate_task_number 用「今年数量+1」生成编号，高并发下可能重复，触发唯一约束错误；建议用序列或插入失败重试。
-14. **资产双可用状态字段**：Asset 同时存在 `available_status` 与 `availability_status`，易混淆且可能导致数据不一致，建议统一或废弃其一。
-15. **导入 Excel 单行异常导致前面行被回滚**：assets 导入循环内某行异常时 `db.rollback()` 会回滚本请求内已成功行，当前行为是「任一行失败则本次全部不提交」，若需「尽量保留成功行」需改成分行提交或 savepoint。
+13. **【已修复】任务编号并发竞态**：safety_check_tasks 的 generate_task_number 已改为 MAX+1 + IntegrityError 重试与随机后缀，避免高并发重复（B9）。
+14. **【已修复】资产双可用状态字段**：Asset 已移除 `availability_status`，统一使用 `available_status`（B10）。
+15. **【已修复】导入 Excel 单行异常导致前面行被回滚**：assets 导入循环内使用 Savepoint 行级回滚，单行失败不影响已成功行（B11）。
 
 **已完成（bug）**：
+
 - Bug 4：编辑申请（当前实现已符合，普通用户走编辑申请、组长组内直接更新）
 - Bug 5：时区（已按方案 A 实现，API 返回东八区 ISO）
 - Bug 6：联动安检只查本单（创建交接/退库仅校验本单资产已完成）
@@ -48,12 +48,16 @@
 - **Bug 3**：用户信息栏位名称不明确（有 EHR 号处统一为「EHR号：xxx」且小字显示，仅姓名处不改）
 - **Bug 7**：交接单状态「待完成联动安全检查」（TransferRequest 增加 `linked_safety_task_id`，接口返回 `pending_linked_safety_check`，前端状态列展示「待完成联动安全检查」）
 - **Bug 8**：撤回交接同时撤回联动检查任务（撤回时若存在 `linked_safety_task_id` 则将对应 SafetyCheckTask 置为 cancelled）
+- **Bug 13**：任务编号并发竞态（B9：generate_task_number 采用 MAX+1 + IntegrityError 捕获及随机后缀重试）
+- **Bug 14**：资产双可用状态字段（B10：models/schemas 移除 availability_status，统一 available_status）
+- **Bug 15**：导入 Excel 单行异常回滚（B11：导入循环内 Savepoint 行级回滚，单行错误不中断批量导入）
 
 ---
 
 ## 实现顺序与风险说明
 
 **已完成（需求/功能）**：
+
 - 3：菜单（管理员「我的安全检查任务」+「安全检查任务」，组长「安全检查任务」）
 - 1：管理员资产与自检（使用人可为管理员，可执行分配给自己的任务）
 - 7：任务按状态筛选
@@ -61,32 +65,49 @@
 - 9：改使用人时同步改执行人
 - 10：资产可用状态
 - 2：审批后已审批记录（已审批 Tab）
+- 4：离职全资产生成任务（标记离职后该用户全部资产生成安全检查任务，含终端/数据；统一 `_create_resignation_safety_tasks`，两处入口一致）
+- 5：任务搜索全字段（发布安全检查任务时资产搜索关键字覆盖所有相关字段，见 assets 列表 search）
+- 6 + Bug 7/8：交接联动安检状态展示（B4/B5）与需求 6 体验（创建交接时校验本单资产已完成安检，已存在）
+- 过期检查任务（方案 B）：截止时间已过且仍为 pending 的任务/任务资产在列表加载时更新为 overdue；待检查数/红点仅统计 pending；「我的任务」增加「已逾期」Tab，支持补检
 
-| 顺序 | 需求/ Bug | 说明与依赖 | 对现有代码的潜在影响 |
-|------|-----------|------------|----------------------|
-| **1** | **4. 离职全资产生成任务** | 标记离职后该用户**全部**资产生成安全检查任务，且含终端/数据类。核对现有离职联动是否已覆盖全部资产、检查类型是否含终端/数据。 | 若当前按「部分资产」或部分类型创建，改为全量/全类型可能增加任务量，需确认业务与性能。 |
-| **2** | **5. 任务搜索全字段** | 发布安全检查任务时搜索关键字覆盖所有相关字段。后端/前端搜索参数与接口扩展。 | 仅扩展搜索条件，注意 SQL 与索引，避免全表模糊查。 |
-| **3** | **6 + Bug 7/8** | 6：交接需联动安检完成后发起（状态与体验）。~~Bug 7~~/**Bug 8**：**已实现**（B4/B5：linked_safety_task_id、待完成联动安全检查展示、撤回时取消联动任务）。 | 已落实 B4/B5；需求 6 若需进一步体验优化可单独排期。 |
+
+| 顺序        | 需求/ Bug              | 说明与依赖                                                  | 对现有代码的潜在影响 |
+| --------- | -------------------- | ------------------------------------------------------ | ---------- |
+| ~~**1**~~ | ~~**4. 离职全资产生成任务**~~ | **已完成**                                                | —          |
+| ~~**2**~~ | ~~**5. 任务搜索全字段**~~   | **已完成**                                                | —          |
+| ~~**3**~~ | ~~**6 + Bug 7/8**~~  | **已完成**（B4 待完成联动安检状态、B5 撤回同时取消联动任务；需求 6 创建交接校验本单安检已完成） | —          |
+
 
 ### 待修复 Bug 实现顺序（原因与需改代码）
 
-**已完成（本轮）**：B1（Bug 1 修改使用人提示）、B2（Bug 2 选择使用人自动带出）、B3（Bug 3 EHR 号标注）、B4（Bug 7 待完成联动安全检查）、B5（Bug 8 撤回交接同时取消联动任务）；另：资产交接模块状态列 UI 改为描边标签样式。
+**已完成（本轮）**：B1～B5（见上）；B9（Bug 13 任务编号并发）、B10（Bug 14 资产双可用状态）、B11（Bug 15 导入 Excel 行级回滚）；另：资产交接模块状态列 UI 改为描边标签样式。
 
-| 顺序 | Bug | 原因 | 需改代码/位置 |
-|------|-----|------|----------------|
-| ~~**B1**~~ | ~~Bug 1 修改使用人后的提示~~ | 已实现。 | 后端返回 `triggered_safety_check`；前端提示区分；使用人栏位 extra 提示语。 |
-| ~~**B2**~~ | ~~Bug 2 选择使用人后未自动带出~~ | 已实现。 | 使用人 Select onChange 自动 setFieldsValue 组别/执行人/执行人姓名。 |
-| ~~**B3**~~ | ~~Bug 3 用户信息栏位名称不明确~~ | 已实现。 | 有 EHR 号处展示为「EHR号：xxx」小字，资产/交接/审批/退回/历史/用户管理等。 |
-| ~~**B4**~~ | ~~Bug 7 交接单状态「待完成联动安全检查」~~ | 已实现。 | TransferRequest.linked_safety_task_id、迁移脚本、接口 pending_linked_safety_check、前端状态列。 |
-| ~~**B5**~~ | ~~Bug 8 撤回交接同时撤回联动检查任务~~ | 已实现。 | cancel_transfer_request 中取消 linked SafetyCheckTask 后再删交接单。 |
-| **B6** | **Bug 9 红点提示（管理员）** | `TransferContext` 中 `fetchPendingSafetyChecks` 在 `user.role === 'admin'` 时直接 `setPendingSafetyCheckCount(0)`，管理员不拉取待检查数。 | 前端 `contexts/TransferContext.jsx`：去掉 `if (!user || user.role === 'admin') { setPendingSafetyCheckCount(0); return }`，管理员也调用 `/safety-check-results/my-tasks`（或等价接口）拉取待检查数并展示红点。 |
-| **B7** | **Bug 11 退库审批未清空执行人** | 退库审批通过时情况2/3 只置空 `user_id`/`user_group`，未置空执行人，与「使用人置空则执行人同步」不一致。 | 后端 `routers/approvals.py`：在「情况2」与「情况3」分支中，`asset.user_id = None`、`asset.user_group = None` 后增加 `asset.safety_check_executor_id = None`、`asset.safety_check_executor_name = None`。 |
-| **B8** | **Bug 12 审批交接禁止转入人为管理员（组长交接自己名下资产可转给所有人（含管理员）；仅资产管理编辑使用人时限制组内）** | 需求 1 允许管理员名下可有资产，审批逻辑仍禁止 to_user.role == "admin"，与需求冲突。 | 后端 `routers/approvals.py`：审批交接通过处删除或注释 `if to_user.role == "admin": raise HTTPException(..., "使用人不能是管理员")`；若业务确需禁止，则保留并在文档注明。 |
-| **B9** | **Bug 13 任务编号并发竞态** | `generate_task_number` 用「今年任务 count+1」生成编号，并发请求可能得到相同 count，插入时唯一约束冲突。 | 后端 `routers/safety_check_tasks.py`：方案一：生成编号后插入，若唯一约束冲突则重试生成（如带随机后缀或时间戳）。方案二：用数据库序列/自增或 `SELECT MAX(task_number)+1 FOR UPDATE` 等保证唯一。 |
-| **B10** | **Bug 14 资产双可用状态字段** | `Asset` 同时有 `available_status` 与 `availability_status`，语义重叠，易导致展示/导入不一致。 | 后端：统一只保留 `available_status`（枚举：可用/维修中/已报废）。`models.py`/schemas 中废弃或删除 `availability_status`；迁移历史数据到 `available_status` 后删列；`asset_history`、`assets` 导入导出、冲突解析等处去掉对 `availability_status` 的引用。 |
-| **B11** | **Bug 15 导入 Excel 单行异常导致前面行回滚** | 导入循环内某行异常时 `db.rollback()` 会回滚整个事务，本请求内已成功写入的行也被撤销。 | 后端 `routers/assets.py` 导入：若希望「尽量保留成功行」，可改为每行在 savepoint 内处理，失败只回滚到 savepoint；或每行单独 commit（需注意会话与性能）。若保持「任一行失败则本次全部不提交」，在文档中明确说明即可，可不改代码。 |
+
+| 顺序          | Bug                        | 原因                                                                                                                       | 需改代码/位置                                                                                                                                                                           |
+| ----------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ~~**B1**~~  | ~~Bug 1 修改使用人后的提示~~        | 已实现。                                                                                                                     | 后端返回 `triggered_safety_check`；前端提示区分；使用人栏位 extra 提示语。                                                                                                                             |
+| ~~**B2**~~  | ~~Bug 2 选择使用人后未自动带出~~      | 已实现。                                                                                                                     | 使用人 Select onChange 自动 setFieldsValue 组别/执行人/执行人姓名。                                                                                                                               |
+| ~~**B3**~~  | ~~Bug 3 用户信息栏位名称不明确~~      | 已实现。                                                                                                                     | 有 EHR 号处展示为「EHR号：xxx」小字，资产/交接/审批/退回/历史/用户管理等。                                                                                                                                     |
+| ~~**B4**~~  | ~~Bug 7 交接单状态「待完成联动安全检查」~~ | 已实现。                                                                                                                     | TransferRequest.linked_safety_task_id、迁移脚本、接口 pending_linked_safety_check、前端状态列。                                                                                                  |
+| ~~**B5**~~  | ~~Bug 8 撤回交接同时撤回联动检查任务~~   | 已实现。                                                                                                                     | cancel_transfer_request 中取消 linked SafetyCheckTask 后再删交接单。                                                                                                                        |
+| **B6**      | **Bug 9 红点提示（管理员）**        | `TransferContext` 中 `fetchPendingSafetyChecks` 在 `user.role === 'admin'` 时直接 `setPendingSafetyCheckCount(0)`，管理员不拉取待检查数。 | 前端 `contexts/TransferContext.jsx`：去掉 `if (!user                                                                                                                                   |
+| **B7**      | **Bug 11 退库审批未清空执行人**      | 退库审批通过时情况2/3 只置空 `user_id`/`user_group`，未置空执行人，与「使用人置空则执行人同步」不一致。                                                        | 后端 `routers/approvals.py`：在「情况2」与「情况3」分支中，`asset.user_id = None`、`asset.user_group = None` 后增加 `asset.safety_check_executor_id = None`、`asset.safety_check_executor_name = None`。 |
+| **B8**      | **Bug 12 审批交接禁止转入人为管理员**   | 需求 1 允许管理员名下可有资产，审批逻辑仍禁止 to_user.role == "admin"，与需求冲突。                                                                  | 后端 `routers/approvals.py`：审批交接通过处删除或注释 `if to_user.role == "admin": raise HTTPException(..., "使用人不能是管理员")`；若业务确需禁止，则保留并在文档注明。                                                     |
+| ~~**B9**~~  | ~~Bug 13 任务编号并发竞态~~        | **已实现**。                                                                                                                 | safety_check_tasks.py：MAX+1 + IntegrityError 捕获及随机后缀重试。                                                                                                                           |
+| ~~**B10**~~ | ~~Bug 14 资产双可用状态字段~~       | **已实现**。                                                                                                                 | models/schemas 移除 availability_status，统一 available_status。                                                                                                                        |
+| ~~**B11**~~ | ~~Bug 15 导入 Excel 单行异常回滚~~ | **已实现**。                                                                                                                 | assets.py 导入循环内 Savepoint 行级回滚，单行错误不中断批量导入。                                                                                                                                       |
+
 
 **Bug 9（红点提示）**：与上表 B6 一致，管理员也拉取并显示「我的安全检查任务」待检查数。
 
-**小结**：需求实现顺序 1 → 2 → 3（离职全资产生成任务 → 任务搜索全字段 → 6 与 Bug 7/8）。B1～B5 已完成；待修复 Bug 从 B6 起（B6 红点、B7/B8 审批小改动可优先、B9～B11 按排期）。
+**小结**：需求 1～5 与顺序 3（需求 6 + Bug 7/8）中 B4/B5 已完成；过期检查任务方案 B 已实现。Bug：B1～B5、B9～B11 已完成；**待修复仅剩 B6（红点）、B7（退库审批清空执行人）、B8（审批交接禁止转入人为管理员）**。
 
+---
+
+## 今日完成（3 月 11 日）
+
+- 需求 5 任务搜索全字段：`get_assets` 的 `search` 已扩展至可用状态、团队、卡片编号、检查执行人姓名、电脑类型/应用/计算机名、显示器相关、资产管理联系人、预留 1～6、资产大类名称等。
+- 需求 4 离职全资产生成任务：`users.py` 抽取 `_create_resignation_safety_tasks`，统一使用 `get_check_type_for_asset` 解析类型；`mark_user_resignation` 与 `update_user` 中「改为离职」均调用该函数。
+- 过期检查任务方案 B：`ensure_overdue_status_updated` 在任务列表/我的任务加载时将截止已过且仍为 pending 的标为 overdue；`get_my_tasks` 支持 status=overdue 并返回 overdue_count；前端「我的安全检查任务」增加「已逾期」Tab，支持补检；待检查/补检时未完成含 pending 与 overdue。
+- 审批菜单图标：Layout 审批入口图标改为 `FileDoneOutlined`。
+- 文档：今日 todo 与已完成工作已同步更新。

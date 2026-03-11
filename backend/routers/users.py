@@ -7,13 +7,68 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import User, Asset, SafetyCheckTask, TaskAsset, SafetyCheckAutoConfig, SafetyCheckAssetTypeMapping
+from models import User, Asset, SafetyCheckTask, TaskAsset
 from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange
 from auth import get_current_user, get_current_admin_user, get_password_hash, verify_password
 import pandas as pd
 import io
 from excel_io import cell_to_str, row_to_error_dict
 from utils_time import now_east8
+from safety_check_linkage import get_check_type_for_asset
+from logger import logger
+import random
+
+
+def _create_resignation_safety_tasks(db: Session, user: User, current_user_id: int) -> None:
+    """
+    离职场景：为该用户名下全部资产生成安全检查任务（按类型聚合），不提交事务。
+    使用 get_check_type_for_asset 解析类型（含映射+默认类型+is_active 校验），
+    无法解析的资产跳过并打日志。供 mark_user_resignation 与 update_user 共用。
+    """
+    assets = db.query(Asset).filter(
+        Asset.user_id == user.id,
+        Asset.deleted_at.is_(None)
+    ).all()
+    if not assets:
+        return
+
+    tasks_to_create = {}  # type_id -> [asset_id, ...]
+    for asset in assets:
+        type_id = get_check_type_for_asset(db, asset)
+        if type_id is None:
+            logger.warning(
+                "离职安检：资产 %s (%s) 未匹配到有效检查类型，已跳过",
+                getattr(asset, "name", ""),
+                getattr(asset, "asset_number", asset.id),
+            )
+            continue
+        if type_id not in tasks_to_create:
+            tasks_to_create[type_id] = []
+        tasks_to_create[type_id].append(asset.id)
+
+    ts_str = now_east8().strftime("%Y%m%d%H%M%S")
+    for type_id, asset_ids in tasks_to_create.items():
+        task_number = f"SC-RESIGN-{ts_str}-{user.id}-{type_id}-{random.randint(100, 999)}"
+        task = SafetyCheckTask(
+            task_number=task_number,
+            check_type_id=type_id,
+            title=f"离职安全检查 - {user.real_name}",
+            description=f"用户 {user.real_name} 离职触发的自动安全检查任务",
+            status="pending",
+            source="resignation",
+            created_by_id=current_user_id,
+        )
+        db.add(task)
+        db.flush()
+        for aid in asset_ids:
+            ta = TaskAsset(
+                task_id=task.id,
+                asset_id=aid,
+                assigned_user_id=user.id,
+                status="pending",
+            )
+            db.add(ta)
+
 
 router = APIRouter()
 
@@ -133,64 +188,7 @@ async def mark_user_resignation(
     if user.status == "离职":
         raise HTTPException(status_code=400, detail="该用户已经是离职状态")
 
-    print(f"DEBUG: 收到离职请求, 用户ID={user_id}")
-    # 1. 查找名下资产
-    assets = db.query(Asset).filter(Asset.user_id == user_id, Asset.deleted_at == None).all()
-    print(f"DEBUG: 用户 {user_id} 名下资产数量: {len(assets)}")
-    
-    if assets:
-        # 获取自动配置
-        auto_config = db.query(SafetyCheckAutoConfig).first()
-        print(f"DEBUG: 全局配置={auto_config.default_check_type_id if auto_config else '未配置'}")
-        default_type_id = auto_config.default_check_type_id if auto_config else None
-        
-        # 获取所有映射
-        mappings = {m.asset_type: m.check_type_id for m in db.query(SafetyCheckAssetTypeMapping).all()}
-        print(f"DEBUG: 映射数量={len(mappings)}")
-        
-        # 按类型对资产分类
-        tasks_to_create = {} # {type_id: [asset_ids]}
-        
-        for asset in assets:
-            # 优先匹配映射，否则使用全局默认
-            type_id = mappings.get(asset.name) or default_type_id
-            print(f"DEBUG: 资产 {asset.name} 匹配到的类型ID={type_id}")
-            if type_id:
-                if type_id not in tasks_to_create:
-                    tasks_to_create[type_id] = []
-                tasks_to_create[type_id].append(asset.id)
-        
-        print(f"DEBUG: 计划创建的任务数={len(tasks_to_create)}")
-        
-        # 创建安全检查任务
-        for type_id, asset_ids in tasks_to_create.items():
-            # 生成任务编号: SC-RESIGN-日期-用户ID-类型ID-随机数
-            import random
-            ts_str = now_east8().strftime('%Y%m%d%H%M%S')
-            task_number = f"SC-RESIGN-{ts_str}-{user_id}-{type_id}-{random.randint(100, 999)}"
-            
-            task = SafetyCheckTask(
-                task_number=task_number,
-                check_type_id=type_id,
-                title=f"离职安全检查 - {user.real_name}",
-                description=f"用户 {user.real_name} 离职触发的自动安全检查任务",
-                status="pending",
-                source="resignation",
-                created_by_id=current_user.id
-            )
-            db.add(task)
-            db.flush() # 确保获取到 task.id
-            
-            for aid in asset_ids:
-                ta = TaskAsset(
-                    task_id=task.id,
-                    asset_id=aid,
-                    assigned_user_id=user_id,
-                    status="pending"
-                )
-                db.add(ta)
-    
-    # 2. 更新用户状态
+    _create_resignation_safety_tasks(db, user, current_user.id)
     user.status = "离职"
     db.commit()
     db.refresh(user)
@@ -224,28 +222,9 @@ async def update_user(
     if user_data.password is not None:
         user.password_hash = get_password_hash(user_data.password)
     
-    # 【新增：若变更为离职状态，触发全量资产安检下发】
     if old_status != "离职" and user.status == "离职":
-        from models import Asset
-        from safety_check_linkage import create_system_allocated_task
-        from logger import logger
-        
-        assets = db.query(Asset).filter(
-            Asset.user_id == user.id,
-            Asset.deleted_at.is_(None)
-        ).all()
-        
-        for asset_item in assets:
-            try:
-                create_system_allocated_task(
-                    db=db,
-                    asset_id=asset_item.id,
-                    assigned_user_id=user.id,
-                    source="resignation"
-                )
-            except Exception as e:
-                logger.error(f"处理员工离职下发资产全量安检任务失败 (资产 {asset_item.asset_number}): {e}", exc_info=True)
-    
+        _create_resignation_safety_tasks(db, user, current_user.id)
+
     db.commit()
     db.refresh(user)
     return UserResponse.model_validate(user)

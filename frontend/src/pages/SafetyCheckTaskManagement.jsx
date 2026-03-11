@@ -660,7 +660,7 @@ const SafetyCheckTaskManagement = () => {
                     </Select>
                   </Form.Item>
                   <Form.Item name="search" label="搜索">
-                    <Input placeholder="资产编号/名称" style={{ width: 200 }} />
+                    <Input placeholder="编号/名称/规格/使用人/执行人/位置等" style={{ width: 260 }} />
                   </Form.Item>
                   <Form.Item>
                     <Button type="primary" onClick={handleAssetSearch}>搜索</Button>

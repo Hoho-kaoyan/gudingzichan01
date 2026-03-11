@@ -12,7 +12,8 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   FileTextOutlined,
-  LockOutlined
+  LockOutlined,
+  FileDoneOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
@@ -134,7 +135,7 @@ const Layout = () => {
       },
       {
         key: '/approvals',
-        icon: <CheckCircleOutlined />,
+        icon: <FileDoneOutlined />,
         label: renderApprovalLabel()
       },
       {

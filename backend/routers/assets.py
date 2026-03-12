@@ -328,9 +328,9 @@ async def get_assets(
             )
         )
     
-    # 组长只能看到本组资产
-    if current_user.role == "leader":
-        query = query.filter(Asset.user_group == current_user.group)
+    # 【修改：不再限制只有拥有本组别资产可见，实现查看全量化放开，而编辑权限已经在 update 接口按角色收口】
+    # if current_user.role == "leader":
+    #     query = query.filter(Asset.user_group == current_user.group)
     
     assets = query.offset(skip).limit(limit).all()
     return [AssetResponse.model_validate(asset) for asset in assets]

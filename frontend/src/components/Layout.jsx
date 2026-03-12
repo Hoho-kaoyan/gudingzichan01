@@ -38,7 +38,7 @@ function SidebarSafetyCheckLabel() {
       </span>
     )
   }
-  return '我的安全检查任务'
+  return '我的检查任务'
 }
 
 const Layout = () => {
@@ -146,7 +146,7 @@ const Layout = () => {
       {
         key: '/safety-check-tasks',
         icon: <FileTextOutlined />,
-        label: '安全检查任务'
+        label: '检查任务管理'
       }
     )
   } else {

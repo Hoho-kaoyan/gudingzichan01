@@ -28,6 +28,23 @@ from safety_check_linkage import create_system_allocated_task
 
 router = APIRouter()
 
+
+def _normalize_and_validate_status_user_id(status: str, user_id: Optional[int], user_group: Optional[str] = None):
+    """
+    业务规则：在库=无人使用，在用=必须指定使用人。
+    - status 为「在库」时：强制 user_id 为空，返回 (status, None, None)。
+    - status 为「在用」时：若 user_id 为空则抛出 ValueError。
+    返回 (status, user_id, user_group) 供写入数据库。
+    """
+    if status == "在库" or status == "库存备用":
+        return ("在库", None, None)
+    if status == "在用":
+        if user_id is None:
+            raise ValueError("状态为在用时，必须指定使用人")
+        return (status, user_id, user_group or None)
+    return (status, user_id, user_group)
+
+
 # 导入冲突比对：资产字段名 -> 中文标签（用于展示差异）
 ASSET_FIELD_LABELS = {
     "category_id": "所属大类",
@@ -215,6 +232,14 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
         if u:
             safety_check_executor_id = u.id
             safety_check_executor_name = u.real_name
+    # 业务规则：在库=无使用人，在用=必填使用人
+    if status == "在库":
+        user_id = None
+        user_group = None
+        safety_check_executor_id = None
+        safety_check_executor_name = None
+    elif status == "在用" and user_id is None:
+        raise ValueError("状态为在用时，必须指定使用人（请填写使用人EHR号或所有人）")
     parsed = {
         "category_id": category.id, "name": name, "specification": specification,
         "status": status, "available_status": available_status, "mac_address": mac_address, "ip_address": ip_address,
@@ -450,6 +475,18 @@ async def create_asset(
             if not asset_dict.get("user_group"):
                 asset_dict["user_group"] = user.group
 
+    # 业务规则：在库=无使用人，在用=必填使用人
+    try:
+        status = asset_dict.get("status", "在用")
+        uid = asset_dict.get("user_id")
+        ug = asset_dict.get("user_group")
+        status, uid, ug = _normalize_and_validate_status_user_id(status, uid, ug)
+        asset_dict["status"] = status
+        asset_dict["user_id"] = uid
+        asset_dict["user_group"] = ug
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
     db_asset = Asset(**asset_dict)
     db.add(db_asset)
     db.flush()  # 先flush获取ID
@@ -670,17 +707,27 @@ async def update_asset(
     # 更新字段
     update_data = asset_data.dict(exclude_unset=True)
     
-    # 使用人可为管理员（管理员名下可有资产并对自己资产做检查）
-    # （不再限制「使用人不能是管理员」）
+    # 业务规则：状态改为「在库」时强制清空使用人
+    if update_data.get("status") == "在库":
+        update_data["user_id"] = None
+        update_data["user_group"] = None
     
-    # 【改动：延迟调拨生效拦截】
+    # 使用人可为管理员（管理员名下可有资产并对自己资产做检查）
+    # 【改动：延迟调拨生效拦截】仅当「当前已有使用人」且「改为另一用户」时视为调拨；在库→在用并选人则直接落库
     is_reallocation = False
-    new_user_id = asset_data.user_id
-    if "user_id" in update_data and new_user_id != old_values.get("user_id"):
+    new_user_id = update_data.get("user_id") if "user_id" in update_data else asset_data.user_id
+    old_user_id = old_values.get("user_id")
+    if (
+        "user_id" in update_data
+        and new_user_id is not None
+        and old_user_id is not None  # 当前已有使用人，才是「换人」调拨；在库(无使用人)→在用(选人) 直接更新
+        and new_user_id != old_user_id
+    ):
         is_reallocation = True
+        new_user_id = update_data["user_id"]
         del update_data["user_id"]
         if "user_group" in update_data:
-            del update_data["user_group"] # 等调拨生效时一起改
+            del update_data["user_group"]  # 等调拨生效时一起改
 
     changed_fields = []
     for field, value in update_data.items():
@@ -688,6 +735,10 @@ async def update_asset(
         if old_val != value:
             setattr(asset, field, value)
             changed_fields.append(field)
+    
+    # 业务规则：在用必须指定使用人
+    if asset.status == "在用" and asset.user_id is None:
+        raise HTTPException(status_code=400, detail="状态为在用时，必须指定使用人")
             
     # 【新增：延迟调用和安检派发】仅修改使用人时联动；仅修改使用人组别不联动
     triggered_safety_check = False
@@ -969,6 +1020,14 @@ async def import_assets(
                             else:
                                 raise ValueError(f"使用人EHR号{user_ehr}不存在")
                     
+                    # 业务规则：在库=无使用人，在用=必填使用人
+                    if status == "在库":
+                        user_id = None
+                        user_group = None
+                        safety_check_executor_id = None
+                        safety_check_executor_name = None
+                    elif status == "在用" and user_id is None:
+                        raise ValueError("状态为在用时，必须指定使用人（请填写使用人EHR号或所有人）")
                     # 若仅修改了使用人且未显式指定执行人，则将执行人重置为新使用人
                     if user_id is not None and safety_check_executor_id is None and not safety_check_executor_name:
                         u = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()

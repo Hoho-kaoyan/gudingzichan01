@@ -8,7 +8,8 @@ import {
   SafetyCertificateOutlined,
   UnorderedListOutlined,
   CalendarOutlined,
-  PlayCircleOutlined
+  PlayCircleOutlined,
+  HistoryOutlined
 } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
@@ -67,10 +68,10 @@ const MySafetyCheckTasks = () => {
       form.resetFields()
       setCheckModalVisible(true)
       
-      // 如果有未完成的资产，定位到第一个
-      const firstPendingIndex = assets.findIndex(a => a.status === 'pending')
-      if (firstPendingIndex >= 0) {
-        setCurrentAssetIndex(firstPendingIndex)
+      // 如果有未完成的资产（待检查或已逾期），定位到第一个
+      const firstUnfinishedIndex = assets.findIndex(a => a.status === 'pending' || a.status === 'overdue')
+      if (firstUnfinishedIndex >= 0) {
+        setCurrentAssetIndex(firstUnfinishedIndex)
       }
     } catch (error) {
       console.error('获取任务详情失败:', error)
@@ -169,10 +170,10 @@ const MySafetyCheckTasks = () => {
       }
       setCurrentAssets(updatedAssets)
 
-      // 如果还有未完成的资产，继续下一个
-      const nextPendingIndex = updatedAssets.findIndex((a, idx) => idx > currentAssetIndex && a.status === 'pending')
-      if (nextPendingIndex >= 0) {
-        setCurrentAssetIndex(nextPendingIndex)
+      // 如果还有未完成的资产（待检查或已逾期），继续下一个
+      const nextUnfinishedIndex = updatedAssets.findIndex((a, idx) => idx > currentAssetIndex && (a.status === 'pending' || a.status === 'overdue'))
+      if (nextUnfinishedIndex >= 0) {
+        setCurrentAssetIndex(nextUnfinishedIndex)
         form.resetFields()
       } else {
         // 全部完成，关闭弹窗
@@ -186,126 +187,94 @@ const MySafetyCheckTasks = () => {
     }
   }
 
-  // 按当前 Tab 过滤展示的任务列表（计数始终基于完整 tasks，避免切换 Tab 时数字变 0）
-  const displayedTasks = activeTab === 'pending'
-    ? tasks.filter(t => t.pending_count > 0)
-    : activeTab === 'checked'
-      ? tasks.filter(t => t.pending_count === 0)
-      : tasks
+  // 待检查数/红点仅统计 pending；已逾期单独 Tab（方案 B）
+  const pendingTasks = tasks.filter(t => (t.pending_count || 0) > 0)
+  const overdueTasks = tasks.filter(t => (t.overdue_count || 0) > 0)
+  const completedTasks = tasks.filter(t => (t.pending_count || 0) === 0 && (t.overdue_count || 0) === 0)
 
+  const displayedTasks = activeTab === 'pending'
+    ? pendingTasks
+    : activeTab === 'overdue'
+      ? overdueTasks
+      : activeTab === 'checked'
+        ? completedTasks
+        : tasks
+
+  const tabLabelStyle = { display: 'inline-flex', alignItems: 'center', gap: 8 }
   const tabItems = [
     {
       key: 'pending',
       label: (
-        <span>
+        <span style={tabLabelStyle}>
           <ClockCircleOutlined />
-          待检查 ({tasks.filter(t => t.pending_count > 0).length})
+          待检查 ({pendingTasks.length})
+        </span>
+      )
+    },
+    {
+      key: 'overdue',
+      label: (
+        <span style={tabLabelStyle}>
+          <HistoryOutlined />
+          已逾期 ({overdueTasks.length})
         </span>
       )
     },
     {
       key: 'checked',
       label: (
-        <span>
+        <span style={tabLabelStyle}>
           <CheckCircleOutlined />
-          已完成 ({tasks.filter(t => t.pending_count === 0).length})
+          已完成 ({completedTasks.length})
         </span>
       )
-    },
-    {
-      key: 'all',
-      label: '全部'
     }
   ]
 
   // 方案二：大卡片 + 明确信息层级（2~3 列网格，顶部标题+状态，中部信息+图标，底部操作）
   const renderTaskCard = (task) => {
-    const isPending = task.pending_count > 0
-    const isOverdue = task.deadline && dayjs(task.deadline).isBefore(dayjs())
+    const isPending = (task.pending_count || 0) > 0
+    const isOverdue = (task.overdue_count || 0) > 0
 
     return (
-      <Col key={task.task_id} xs={24} sm={24} md={12} lg={8} style={{ marginBottom: 20 }}>
-        <Card
-          className="my-safety-check-task-card"
-          style={{
-            height: '100%',
-            borderRadius: 8,
-            boxShadow: '0 1px 4px rgba(0,0,0,0.08)',
-            border: '1px solid #f0f0f0',
-            transition: 'box-shadow 0.2s ease, border-color 0.2s ease'
-          }}
-          bodyStyle={{ padding: 20, display: 'flex', flexDirection: 'column', height: '100%', minHeight: 260 }}
-        >
-          {/* 顶部：任务标题 + 状态 */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16, flexShrink: 0 }}>
-            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, lineHeight: 1.4, flex: 1, paddingRight: 8 }}>
-              {task.task_title}
-            </h3>
-            <Space size={4} wrap>
+      <Card
+        key={task.task_id}
+        style={{ marginBottom: 16 }}
+        actions={[
+          <Button
+            type="link"
+            icon={<EyeOutlined />}
+            onClick={() => handleStartCheck(task.task_id)}
+          >
+            查看详情
+          </Button>,
+          (isPending || isOverdue) && (
+            <Button
+              type="primary"
+              onClick={() => handleStartCheck(task.task_id)}
+            >
+              {isOverdue ? '补检' : '开始检查'}
+            </Button>
+          )
+        ].filter(Boolean)}
+      >
+        <div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
+            <h3>{task.task_title}</h3>
+            <Space>
+              {isPending && <Tag color="processing">待检查</Tag>}
               {isOverdue && <Tag color="error">已逾期</Tag>}
-              {isPending ? (
-                <Tag color="processing">待检查</Tag>
-              ) : (
-                <Tag color="success">已完成</Tag>
-              )}
+              {!isPending && !isOverdue && <Tag color="success">已完成</Tag>}
             </Space>
           </div>
-
-          {/* 中部：任务编号、检查类型、待检查数、截止时间（带图标） */}
-          <div style={{ flex: 1, marginBottom: 16 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
-              <FileTextOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
-              <span>任务编号：{task.task_number}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
-              <SafetyCertificateOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
-              <span>检查类型：{task.check_type?.name || '-'}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, color: '#595959', fontSize: 13 }}>
-              <UnorderedListOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
-              <span>待检查：{task.pending_count} 项</span>
-            </div>
-            {task.deadline && (
-              <div style={{ display: 'flex', alignItems: 'center', color: '#595959', fontSize: 13 }}>
-                <CalendarOutlined style={{ marginRight: 8, color: '#8c8c8c' }} />
-                <span>截止时间：{dayjs(task.deadline).format('YYYY-MM-DD HH:mm')}</span>
-              </div>
-            )}
-          </div>
-
-          {/* 底部：主操作按钮（两边对齐） */}
-          <div
-            style={{
-              borderTop: '1px solid #f0f0f0',
-              paddingTop: 16,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              flexShrink: 0
-            }}
-          >
-            <Button
-              icon={<EyeOutlined />}
-              onClick={() => handleStartCheck(task.task_id)}
-              style={{ borderRadius: 6 }}
-            >
-              查看详情
-            </Button>
-            {isPending ? (
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                onClick={() => handleStartCheck(task.task_id)}
-                style={{ borderRadius: 6 }}
-              >
-                开始检查
-              </Button>
-            ) : (
-              <span />
-            )}
-          </div>
-        </Card>
-      </Col>
+          <p><strong>任务编号:</strong> {task.task_number}</p>
+          <p><strong>检查类型:</strong> {task.check_type?.name || '-'}</p>
+          <p><strong>{isOverdue ? '已逾期:' : '待检查:'}</strong> {isOverdue ? (task.overdue_count || 0) : (task.pending_count || 0)}项</p>
+          {task.deadline && (
+            <p><strong>截止时间:</strong> {dayjs(task.deadline).format('YYYY-MM-DD HH:mm')}</p>
+          )}
+        </div>
+      </Card>
     )
   }
 

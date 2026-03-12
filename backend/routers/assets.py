@@ -302,9 +302,29 @@ async def get_assets(
                 Asset.remark.ilike(like_value),
                 Asset.user_group.ilike(like_value),
                 Asset.status.ilike(like_value),
+                Asset.available_status.ilike(like_value),
+                Asset.team.ilike(like_value),
+                Asset.card_number.ilike(like_value),
+                Asset.safety_check_executor_name.ilike(like_value),
+                Asset.computer_type.ilike(like_value),
+                Asset.computer_usage.ilike(like_value),
+                Asset.computer_name.ilike(like_value),
+                Asset.monitor1_model.ilike(like_value),
+                Asset.monitor1_asset_number.ilike(like_value),
+                Asset.monitor1_serial.ilike(like_value),
+                Asset.monitor2_model.ilike(like_value),
+                Asset.monitor2_asset_number.ilike(like_value),
+                Asset.monitor2_serial.ilike(like_value),
+                Asset.asset_contact.ilike(like_value),
+                Asset.reserve_1.ilike(like_value),
+                Asset.reserve_2.ilike(like_value),
+                Asset.reserve_3.ilike(like_value),
+                Asset.reserve_4.ilike(like_value),
+                Asset.reserve_5.ilike(like_value),
+                Asset.reserve_6.ilike(like_value),
                 AssetCategory.name.ilike(like_value),
                 User.real_name.ilike(like_value),
-                User.ehr_number.ilike(like_value)
+                User.ehr_number.ilike(like_value),
             )
         )
     
@@ -1037,7 +1057,7 @@ async def import_assets(
                         diffs = _build_import_conflict_diffs(existing_any, parsed, db)
                         if not diffs:
                             skip_count += 1
-                            return # 这里跳出 begin_nested，继续下一行
+                            continue # 这里跳出 begin_nested，继续下一行
                         conflict_count += 1
                         conflict_details.append(ImportConflictDetail(
                             row_number=row_number,
@@ -1046,7 +1066,7 @@ async def import_assets(
                             diffs=diffs,
                             row_data=row_to_error_dict(row_data),
                         ))
-                        return # 继续下一行
+                        continue # 继续下一行
                     
                     if existing_any and existing_any.deleted_at is not None:
                         # 存在且已逻辑删除：恢复并更新该行，不插入

@@ -30,6 +30,29 @@ import pandas as pd
 router = APIRouter()
 
 
+def ensure_overdue_status_updated(db: Session) -> None:
+    """
+    方案 B：将截止时间已过且仍为 pending 的任务与任务资产更新为 overdue。
+    待检查数/红点仅统计 pending，不统计 overdue。在 get_tasks / get_my_tasks 前调用。
+    """
+    now = now_east8()
+    # 任务表：deadline 已过且 status 仍为 pending 的改为 overdue
+    overdue_tasks = db.query(SafetyCheckTask).filter(
+        SafetyCheckTask.deadline.isnot(None),
+        SafetyCheckTask.deadline < now,
+        SafetyCheckTask.status == "pending"
+    ).all()
+    for task in overdue_tasks:
+        task.status = "overdue"
+        # 该任务下仍为 pending 的 TaskAsset 改为 overdue
+        db.query(TaskAsset).filter(
+            TaskAsset.task_id == task.id,
+            TaskAsset.status == "pending"
+        ).update({TaskAsset.status: "overdue"}, synchronize_session="fetch")
+    if overdue_tasks:
+        db.commit()
+
+
 def generate_task_number(db: Session, retry_count: int = 0) -> str:
     """生成任务编号：SAFETY-YYYY-NNN"""
     year = now_east8().year
@@ -155,6 +178,7 @@ async def get_tasks(
     current_user: User = Depends(get_current_user)
 ):
     """获取任务列表"""
+    ensure_overdue_status_updated(db)
     query = db.query(SafetyCheckTask)
     
     # 普通用户只能查看分配给自己的任务

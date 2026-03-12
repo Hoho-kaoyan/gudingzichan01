@@ -16,6 +16,7 @@ from schemas import (
 )
 from auth import get_current_user
 from logger import logger
+from routers.safety_check_tasks import ensure_overdue_status_updated
 import json
 
 router = APIRouter()
@@ -25,12 +26,12 @@ LOG_TAG = "[my-tasks]"
 
 @router.get("/my-tasks", response_model=dict)
 async def get_my_tasks(
-    status: Optional[str] = Query(None, description="状态筛选：pending/checked"),
+    status: Optional[str] = Query(None, description="状态筛选：pending/checked/overdue"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """获取我的待检查任务"""
-    logger.info("%s 请求: user_id=%s role=%s real_name=%s status=%s", LOG_TAG, current_user.id, getattr(current_user, "role", None), getattr(current_user, "real_name", None), status)
+    """获取我的待检查任务。待检查数/红点仅统计 pending，不统计 overdue。"""
+    ensure_overdue_status_updated(db)
     query = db.query(SafetyCheckTask).join(TaskAsset).filter(
         TaskAsset.assigned_user_id == current_user.id,
         SafetyCheckTask.status != "cancelled"
@@ -41,6 +42,8 @@ async def get_my_tasks(
             query = query.filter(TaskAsset.status == "pending")
         elif status == "checked":
             query = query.filter(TaskAsset.status == "checked")
+        elif status == "overdue":
+            query = query.filter(TaskAsset.status == "overdue")
     
     tasks = query.order_by(SafetyCheckTask.created_at.desc()).all()
     
@@ -54,6 +57,7 @@ async def get_my_tasks(
         ).all()
         
         pending_count = len([ta for ta in my_assets if ta.status == "pending"])
+        overdue_count = len([ta for ta in my_assets if ta.status == "overdue"])
         
         # 获取检查类型信息
         check_type = db.query(SafetyCheckType).filter(SafetyCheckType.id == task.check_type_id).first()
@@ -75,6 +79,7 @@ async def get_my_tasks(
             "task_title": task.title,
             "check_type": check_type_dict,
             "pending_count": pending_count,
+            "overdue_count": overdue_count,
             "deadline": task.deadline
         })
     

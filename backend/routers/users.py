@@ -188,6 +188,23 @@ async def mark_user_resignation(
     if user.status == "离职":
         raise HTTPException(status_code=400, detail="该用户已经是离职状态")
 
+    # 【新增：强级拦截】离职前检查是否还负责他人的安检执行工作
+    is_executor_for_others = db.query(Asset).filter(
+        Asset.safety_check_executor_id == user_id,
+        Asset.deleted_at.is_(None)
+    ).first()
+    
+    if is_executor_for_others:
+        # 为了输出更准确的提示，可以只扫一眼计数
+        count = db.query(Asset).filter(
+            Asset.safety_check_executor_id == user_id,
+            Asset.deleted_at.is_(None)
+        ).count()
+        raise HTTPException(
+            status_code=400, 
+            detail=f"该员工目前仍担任 {count} 件资产的检查执行人，请先将这些资产的安检职责移交他人，方可办理离职！"
+        )
+
     _create_resignation_safety_tasks(db, user, current_user.id)
     user.status = "离职"
     db.commit()
@@ -223,6 +240,22 @@ async def update_user(
         user.password_hash = get_password_hash(user_data.password)
     
     if old_status != "离职" and user.status == "离职":
+        # 【新增：强级拦截】离职前检查是否还负责他人的安检执行工作 (与 mark_user_resignation 同步)
+        is_executor_for_others = db.query(Asset).filter(
+            Asset.safety_check_executor_id == user_id,
+            Asset.deleted_at.is_(None)
+        ).first()
+        
+        if is_executor_for_others:
+            count = db.query(Asset).filter(
+                Asset.safety_check_executor_id == user_id,
+                Asset.deleted_at.is_(None)
+            ).count()
+            raise HTTPException(
+                status_code=400, 
+                detail=f"该员工目前仍担任 {count} 件资产的检查执行人，请先将这些资产的安检职责移交他人，方可将其状态更改为离职！"
+            )
+            
         _create_resignation_safety_tasks(db, user, current_user.id)
 
     db.commit()

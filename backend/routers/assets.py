@@ -1057,7 +1057,7 @@ async def import_assets(
                         diffs = _build_import_conflict_diffs(existing_any, parsed, db)
                         if not diffs:
                             skip_count += 1
-                            return # 这里跳出 begin_nested，继续下一行
+                            continue # 这里跳出 begin_nested，继续下一行
                         conflict_count += 1
                         conflict_details.append(ImportConflictDetail(
                             row_number=row_number,
@@ -1066,7 +1066,7 @@ async def import_assets(
                             diffs=diffs,
                             row_data=row_to_error_dict(row_data),
                         ))
-                        return # 继续下一行
+                        continue # 继续下一行
                     
                     if existing_any and existing_any.deleted_at is not None:
                         # 存在且已逻辑删除：恢复并更新该行，不插入

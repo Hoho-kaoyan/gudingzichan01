@@ -246,6 +246,23 @@ async def delete_user(
     # 禁止管理员删除自己
     if current_user.id == user_id:
         raise HTTPException(status_code=400, detail="不能删除自己的账号")
+        
+    # 【新增：拦截验证】检查该员工名下是否还有绑定的有效资产
+    has_assets = db.query(Asset).filter(
+        Asset.user_id == user_id, 
+        Asset.deleted_at.is_(None),
+        Asset.status != "已报废" # (如果是报废并且想删人，业务上可能要求资产也要解绑，简单起见只要是未删除的资产有绑定就拦截)
+    ).first()
+    if has_assets:
+        raise HTTPException(status_code=400, detail="该用户名下存在资产不可删除")
+        
+    # 【新增：拦截验证】检查该员工是否被登记为其他资产的检查执行人
+    is_executor_for_assets = db.query(Asset).filter(
+        Asset.safety_check_executor_id == user_id,
+        Asset.deleted_at.is_(None)
+    ).first()
+    if is_executor_for_assets:
+        raise HTTPException(status_code=400, detail="该用户已被登记为其他资产的检查执行人，不可删除")
     
     user.deleted_at = now_east8()
     user.deleted_by_id = current_user.id

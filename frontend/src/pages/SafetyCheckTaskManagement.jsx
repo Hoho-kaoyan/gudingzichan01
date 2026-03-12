@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Table, Button, Modal, Form, Input, Select, DatePicker, message, Popconfirm, Space, Steps, Card, Tag, Checkbox, Tooltip, Switch, Empty } from 'antd'
-import { PlusOutlined, EyeOutlined, CloseOutlined, SettingOutlined, EditOutlined, DeleteOutlined, ToolOutlined } from '@ant-design/icons'
+import { PlusOutlined, EyeOutlined, CloseOutlined, SettingOutlined, EditOutlined, DeleteOutlined, ToolOutlined, DownloadOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 import dayjs from 'dayjs'
@@ -274,6 +274,33 @@ const SafetyCheckTaskManagement = () => {
     }
   }
 
+  const handleExport = async (record) => {
+    try {
+      const res = await api.get(`/safety-check-tasks/${record.id}/export`, { responseType: 'blob' })
+      const disposition = res.headers?.['content-disposition']
+      let filename = `${record.title || '任务导出'}_${dayjs().format('YYYYMMDD')}.xlsx`
+      if (disposition) {
+        const match = disposition.match(/filename\*=UTF-8''(.+)/)
+        if (match) filename = decodeURIComponent(match[1].trim())
+        else {
+          const m = disposition.match(/filename="?([^";]+)/)
+          if (m) filename = m[1].trim()
+        }
+      }
+      const url = window.URL.createObjectURL(new Blob([res.data]))
+      const a = document.createElement('a')
+      a.href = url
+      a.setAttribute('download', filename)
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      a.remove()
+      message.success('导出成功')
+    } catch (error) {
+      message.error(error.response?.data?.detail || '导出失败')
+    }
+  }
+
   const handleViewDetail = async (taskId) => {
     setDetailModalVisible(true)
     setDetailLoading(true)
@@ -518,7 +545,7 @@ const SafetyCheckTaskManagement = () => {
     {
       title: '操作',
       key: 'action',
-      width: 180,
+      width: 220,
       fixed: 'right',
       align: 'center',
       render: (_, record) => (
@@ -526,6 +553,11 @@ const SafetyCheckTaskManagement = () => {
           <Button type="link" icon={<EyeOutlined />} onClick={() => handleViewDetail(record.id)} style={{ padding: 0 }}>
             查看
           </Button>
+          {isAdmin && (record.status === 'completed' || record.status === 'overdue') && (
+            <Button type="link" icon={<DownloadOutlined />} onClick={() => handleExport(record)} style={{ padding: 0, color: '#fa8c16' }}>
+              导出
+            </Button>
+          )}
           {record.status === 'pending' && (
             <Popconfirm
               title="确定要取消此任务吗？"
@@ -700,7 +732,7 @@ const SafetyCheckTaskManagement = () => {
                 label="任务标题"
                 rules={[{ required: true, message: '请输入任务标题' }]}
               >
-                <Input placeholder="例如：2025年第一季度消防安全检查" />
+                <Input placeholder="例如：2025年第一季度数据安全检查" />
               </Form.Item>
 
               <Form.Item
@@ -1009,7 +1041,7 @@ const SafetyCheckTaskManagement = () => {
               label="类型名称"
               rules={[{ required: true, message: '请输入类型名称' }]}
             >
-              <Input placeholder="例如：消防安全检查" />
+              <Input placeholder="例如：数据安全检查" />
             </Form.Item>
 
             <Form.Item

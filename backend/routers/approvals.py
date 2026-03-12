@@ -172,63 +172,18 @@ async def approve_request(
                 }
                 old_user = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
                 
-                # 判断是否修改了保管人
-                changed_user = request.new_user_id is not None
-                
-                # 判断申请人是否修改了其他字段（排除保管人）
-                has_changes = any([
-                    request.mac_address is not None,
-                    request.ip_address is not None,
-                    request.office_location is not None,
-                    request.floor is not None,
-                    request.seat_number is not None,
-                    request.remark is not None
-                ])
-                
-                # 根据三种情况处理：审批通过后资产状态均为"在库"，未指定新保管人时使用人置空
-                if changed_user:
-                    # 情况1：申请人修改了保管人
-                    new_user = db.query(User).filter(User.id == request.new_user_id).first()
-                    if new_user:
-                        if new_user.role == "admin":
-                            raise HTTPException(status_code=400, detail="使用人不能是管理员")
-                        asset.user_id = request.new_user_id
-                        asset.user_group = new_user.group
-                        # 同步更新执行人：默认与新使用人保持一致
-                        asset.safety_check_executor_id = new_user.id
-                        asset.safety_check_executor_name = new_user.real_name
-                    else:
-                        raise HTTPException(status_code=404, detail="指定的保管人不存在")
-                    
-                    asset.mac_address = request.mac_address
-                    asset.ip_address = request.ip_address
-                    asset.office_location = request.office_location
-                    asset.floor = request.floor
-                    asset.seat_number = request.seat_number
-                    asset.remark = request.remark
-                    asset.status = "在库"
-                    
-                elif has_changes:
-                    # 情况2：申请人未修改保管人但修改了其他信息 → 使用人置空，退回在库
-                    asset.user_id = None
-                    asset.user_group = None
-                    asset.safety_check_executor_id = None
-                    asset.safety_check_executor_name = None
-                    asset.status = "在库"
-                    asset.mac_address = request.mac_address
-                    asset.ip_address = request.ip_address
-                    asset.office_location = request.office_location
-                    asset.floor = request.floor
-                    asset.seat_number = request.seat_number
-                    asset.remark = request.remark
-                    
-                else:
-                    # 情况3：申请人没有修改任何字段 → 使用人置空，退回在库
-                    asset.user_id = None
-                    asset.user_group = None
-                    asset.safety_check_executor_id = None
-                    asset.safety_check_executor_name = None
-                    asset.status = "在库"
+                # 审批通过后资产状态为"在库"，使用人置空（退回仓库）
+                asset.user_id = None
+                asset.user_group = None
+                asset.safety_check_executor_id = None
+                asset.safety_check_executor_name = None
+                asset.status = "在库"
+                asset.mac_address = request.mac_address
+                asset.ip_address = request.ip_address
+                asset.office_location = request.office_location
+                asset.floor = request.floor
+                asset.seat_number = request.seat_number
+                asset.remark = request.remark
                 
                 # 将该资产未完成的安全检查任务标记为已退库
                 pending_task_assets = db.query(TaskAsset).filter(
@@ -241,15 +196,14 @@ async def approve_request(
                     logger.info(f"资产退回：安全检查任务资产关联ID {task_asset.id} 已标记为已退库")
                 
                 # 记录审批通过历史
-                new_user_obj = db.query(User).filter(User.id == asset.user_id).first() if asset.user_id else None
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产退回申请: 资产ID {asset.id}({asset.asset_number}), 申请ID {request.id}")
-                
+
                 try:
                     create_history = get_create_history_record()
                     new_values = {
-                        "user_id": asset.user_id,
-                        "user_name": new_user_obj.real_name if new_user_obj else "在库",
-                        "user_group": asset.user_group,
+                        "user_id": None,
+                        "user_name": "在库",
+                        "user_group": None,
                         "status": asset.status,
                         "mac_address": asset.mac_address,
                         "ip_address": asset.ip_address,
@@ -258,20 +212,12 @@ async def approve_request(
                         "seat_number": asset.seat_number,
                         "remark": asset.remark
                     }
-                    
-                    # 构建描述
-                    if changed_user:
-                        desc = f"审批通过资产退回：保管人改为 {new_user_obj.real_name if new_user_obj else ''}，状态改为在库，其他字段按申请人修改"
-                    elif has_changes:
-                        desc = "审批通过资产退回：资产退回在库，状态改为在库，字段按申请人修改"
-                    else:
-                        desc = "审批通过资产退回：资产退回在库，状态改为在库"
-                    
+
                     create_history(
                         db=db,
                         asset_id=request.asset_id,
                         action_type="approve",
-                        action_description=desc,
+                        action_description="审批通过资产退回：资产退回仓库，状态改为在库",
                         operator_id=request.user_id,
                         approver_id=current_user.id,
                         old_value=old_values,

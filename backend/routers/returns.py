@@ -146,12 +146,6 @@ async def create_return_request(
         if asset.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="只能退回自己名下的资产")
     
-    # 如果指定了新的保管人，验证用户是否存在
-    if return_data.new_user_id is not None:
-        new_user = db.query(User).filter(User.id == return_data.new_user_id).first()
-        if not new_user:
-            raise HTTPException(status_code=404, detail="指定的保管人不存在")
-    
     user_id = asset.user_id or current_user.id
     
     # 【只查本单资产】本单资产是否已完成安检，未完成则不允许提交退库
@@ -164,13 +158,13 @@ async def create_return_request(
         user_id=user_id,
         reason=return_data.reason,
         status="pending",
-        # 保存申请人修改的字段
+        # 保存申请人修改的字段（退回仓库，不指定新保管人）
         mac_address=return_data.mac_address,
         ip_address=return_data.ip_address,
         office_location=return_data.office_location,
         floor=return_data.floor,
         seat_number=return_data.seat_number,
-        new_user_id=return_data.new_user_id,
+        new_user_id=None,  # 退回仓库，不指定新保管人
         remark=return_data.remark
     )
     db.add(db_request)
@@ -191,12 +185,9 @@ async def create_return_request(
         changes.append(f"存放楼层: {asset.floor or ''} -> {return_data.floor}")
     if return_data.seat_number is not None:
         changes.append(f"座位号: {asset.seat_number or ''} -> {return_data.seat_number}")
-    if return_data.new_user_id is not None:
-        new_user = db.query(User).filter(User.id == return_data.new_user_id).first()
-        changes.append(f"保管人: {return_user.real_name if return_user else ''} -> {new_user.real_name if new_user else ''}")
     if return_data.remark is not None:
         changes.append(f"备注: {asset.remark or ''} -> {return_data.remark}")
-    
+
     change_desc = ";".join(changes) if changes else "无修改"
     
     # 记录退回申请历史
@@ -214,7 +205,7 @@ async def create_return_request(
             "remark": asset.remark
         }
         new_value = {
-            "user_id": return_data.new_user_id if return_data.new_user_id else None,
+            "user_id": None,  # 退回仓库，使用人置空
             "status": "在库",
             "mac_address": return_data.mac_address,
             "ip_address": return_data.ip_address,

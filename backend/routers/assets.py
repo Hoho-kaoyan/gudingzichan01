@@ -693,10 +693,16 @@ async def update_asset(
         update_data["user_group"] = None
     
     # 使用人可为管理员（管理员名下可有资产并对自己资产做检查）
-    # 【改动：延迟调拨生效拦截】仅当将使用人改为另一非空用户时视为调拨
+    # 【改动：延迟调拨生效拦截】仅当「当前已有使用人」且「改为另一用户」时视为调拨；在库→在用并选人则直接落库
     is_reallocation = False
     new_user_id = update_data.get("user_id") if "user_id" in update_data else asset_data.user_id
-    if "user_id" in update_data and new_user_id is not None and new_user_id != old_values.get("user_id"):
+    old_user_id = old_values.get("user_id")
+    if (
+        "user_id" in update_data
+        and new_user_id is not None
+        and old_user_id is not None  # 当前已有使用人，才是「换人」调拨；在库(无使用人)→在用(选人) 直接更新
+        and new_user_id != old_user_id
+    ):
         is_reallocation = True
         new_user_id = update_data["user_id"]
         del update_data["user_id"]

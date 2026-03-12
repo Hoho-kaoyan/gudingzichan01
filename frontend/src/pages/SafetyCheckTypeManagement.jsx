@@ -350,7 +350,7 @@ const SafetyCheckTypeManagement = () => {
             label="类型名称"
             rules={[{ required: true, message: '请输入类型名称' }]}
           >
-            <Input placeholder="例如：消防安全检查" />
+            <Input placeholder="例如：数据安全检查" />
           </Form.Item>
 
           <Form.Item

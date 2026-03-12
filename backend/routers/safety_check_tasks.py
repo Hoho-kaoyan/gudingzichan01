@@ -3,11 +3,14 @@
 管理员可以创建和管理任务，普通用户可以查看分配给自己的任务
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
 import random
 import string
+import re
+import io
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
@@ -21,6 +24,8 @@ from schemas import (
 )
 from auth import get_current_user, get_current_admin_user
 import json
+from urllib.parse import quote
+import pandas as pd
 
 router = APIRouter()
 
@@ -396,6 +401,121 @@ async def get_task_assets(
         "check_type": check_type_dict,
         "assets": assets
     }
+
+
+# Excel 导出固有列名（与需求一致）
+EXPORT_FIXED_HEADERS = [
+    "电脑类型（WINDOWS/信创）",
+    "电脑应用（OA/BL）",
+    "资产编号",
+    "连接显示器1型号",
+    "显示器1资产编号",
+    "显示器1序列号",
+    "连接显示器2型号",
+    "显示器2资产编号",
+    "显示器2序列号",
+    "终端IP号",
+    "终端MAC地址",
+    "具体存放楼层",
+    "使用人",
+    "使用人EHR",
+    "资产管理联系人",
+]
+
+
+def _safe_filename(title: str) -> str:
+    """将任务标题转为安全文件名：去掉非法字符"""
+    if not title or not title.strip():
+        return "任务导出"
+    s = re.sub(r'[\\/:*?"<>|]', '_', title.strip())
+    return s[:100] if len(s) > 100 else s
+
+
+@router.get("/{task_id}/export")
+async def export_task_result(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user),
+):
+    """导出任务结果 Excel（仅管理员；仅已完成或已逾期任务；包含已退库资产）"""
+    task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task.status not in ("completed", "overdue"):
+        raise HTTPException(status_code=400, detail="仅支持导出已完成或已逾期的任务")
+
+    # 该任务下所有任务资产（含已退库）
+    task_assets = db.query(TaskAsset).filter(TaskAsset.task_id == task_id).order_by(TaskAsset.id).all()
+    check_type = db.query(SafetyCheckType).filter(SafetyCheckType.id == task.check_type_id).first()
+    check_items = []
+    if check_type and check_type.check_items:
+        try:
+            check_items = json.loads(check_type.check_items)
+        except Exception:
+            check_items = []
+    # 检查项列名：按配置顺序，取 item 作为列名
+    check_item_names = [item.get("item") or "" for item in check_items if isinstance(item, dict)]
+
+    def _result_display(val):
+        """导出时检查项结果 yes/no 转为 是/否"""
+        if val == "yes":
+            return "是"
+        if val == "no":
+            return "否"
+        return val or ""
+
+    headers = EXPORT_FIXED_HEADERS + check_item_names + ["备注"]
+    rows = []
+
+    for ta in task_assets:
+        asset = ta.asset
+        if not asset:
+            continue
+        user = asset.user
+        row = {
+            "电脑类型（WINDOWS/信创）": (asset.computer_type or ""),
+            "电脑应用（OA/BL）": (asset.computer_usage or ""),
+            "资产编号": (asset.asset_number or ""),
+            "连接显示器1型号": (asset.monitor1_model or ""),
+            "显示器1资产编号": (asset.monitor1_asset_number or ""),
+            "显示器1序列号": (asset.monitor1_serial or ""),
+            "连接显示器2型号": (asset.monitor2_model or ""),
+            "显示器2资产编号": (asset.monitor2_asset_number or ""),
+            "显示器2序列号": (asset.monitor2_serial or ""),
+            "终端IP号": (asset.ip_address or ""),
+            "终端MAC地址": (asset.mac_address or ""),
+            "具体存放楼层": (asset.floor or ""),
+            "使用人": (user.real_name if user else ""),
+            "使用人EHR": (user.ehr_number if user else ""),
+            "资产管理联系人": (asset.asset_contact or ""),
+        }
+        # 检查项结果
+        items_result = ta.get_check_items_result()
+        result_by_item = {x.get("item"): x.get("result") for x in items_result if isinstance(x, dict) and x.get("item")}
+        for name in check_item_names:
+            row[name] = _result_display(result_by_item.get(name))
+        row["备注"] = (ta.check_comment or "")
+        rows.append(row)
+
+    df = pd.DataFrame(rows, columns=headers)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, index=False, sheet_name="检查结果")
+    output.seek(0)
+
+    date_str = now_east8().strftime("%Y%m%d")
+    safe_title = _safe_filename(task.title)
+    filename = f"{safe_title}_{date_str}.xlsx"
+    # 使用 RFC 5987 编码以支持中文文件名
+    encoded_filename = quote(filename)
+
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{encoded_filename}",
+        },
+    )
 
 
 @router.put("/{task_id}", response_model=SafetyCheckTaskResponse)

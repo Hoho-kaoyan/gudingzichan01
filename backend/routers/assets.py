@@ -713,21 +713,24 @@ async def update_asset(
         update_data["user_group"] = None
     
     # 使用人可为管理员（管理员名下可有资产并对自己资产做检查）
-    # 【改动：延迟调拨生效拦截】仅当「当前已有使用人」且「改为另一用户」时视为调拨；在库→在用并选人则直接落库
+    # 【改动：延迟调拨生效拦截】仅当「当前已有使用人」且「改为另一用户」时视为调拨；在库→在用并选人则触发入库/领用安检
     is_reallocation = False
+    is_inbound_assignment = False
     new_user_id = update_data.get("user_id") if "user_id" in update_data else asset_data.user_id
     old_user_id = old_values.get("user_id")
     if (
         "user_id" in update_data
         and new_user_id is not None
-        and old_user_id is not None  # 当前已有使用人，才是「换人」调拨；在库(无使用人)→在用(选人) 直接更新
-        and new_user_id != old_user_id
     ):
-        is_reallocation = True
-        new_user_id = update_data["user_id"]
-        del update_data["user_id"]
-        if "user_group" in update_data:
-            del update_data["user_group"]  # 等调拨生效时一起改
+        if old_user_id is not None and new_user_id != old_user_id:
+            # 存量用户变更 -> 调拨流程
+            is_reallocation = True
+            del update_data["user_id"]
+            if "user_group" in update_data:
+                del update_data["user_group"]  # 等调拨生效时一起改
+        elif old_user_id is None:
+            # 在库 -> 分配给个人 -> 视为“入职/领用”联动
+            is_inbound_assignment = True
 
     changed_fields = []
     for field, value in update_data.items():
@@ -767,6 +770,22 @@ async def update_asset(
                 logger.info(f"生成待生效调拨记录：资产 {asset.asset_number} 拟移交至新用户ID {new_user_id}")
             except Exception as e:
                 logger.error(f"调拨时触发系统安检任务下发失败: {e}", exc_info=True)
+    
+    # 【新增：出库分配安检】在库状态直接分配给个人，下发“入职/领用”类安检
+    if is_inbound_assignment:
+        assigned_id = getattr(asset, "safety_check_executor_id", None) or new_user_id
+        if assigned_id:
+            try:
+                create_system_allocated_task(
+                    db=db,
+                    asset_id=asset.id,
+                    assigned_user_id=assigned_id,
+                    source="inbound"
+                )
+                triggered_safety_check = True
+                logger.info(f"资产出库分配：资产 {asset.asset_number} 分配给用户ID {new_user_id}，已下发安检任务")
+            except Exception as e:
+                logger.error(f"出库分配时触发系统安检任务下发失败: {e}", exc_info=True)
     
     # 如果状态改为"在库"，将未完成的安全检查任务标记为已退库
     if "status" in changed_fields and asset.status == "在库":

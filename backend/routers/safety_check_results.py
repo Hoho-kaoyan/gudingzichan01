@@ -287,6 +287,31 @@ async def submit_check_result(
                 
                 # 阅后即焚，删掉临时占位的记录
                 db.delete(pending)
+                
+        # 【新增：离职安全检查任务完成时，对应资产自动退回仓库】
+        elif task.source == "resignation":
+            from models import AssetStatus, AssetHistory
+            from logger import logger
+            task_assets = db.query(TaskAsset).filter(TaskAsset.task_id == task.id).all()
+            for ta in task_assets:
+                asset_to_return = db.query(Asset).filter(Asset.id == ta.asset_id).first()
+                if asset_to_return and asset_to_return.status != AssetStatus.IN_STOCK.value:
+                    asset_to_return.status = AssetStatus.IN_STOCK.value
+                    asset_to_return.user_id = None
+                    asset_to_return.user_group = None
+                    asset_to_return.safety_check_executor_id = None
+                    asset_to_return.safety_check_executor_name = None
+                    
+                    logger.info(f"离职安全检查任务[{task.task_number}]完成，资产[{asset_to_return.asset_number}]已自动退库")
+                    
+                    # 追加资产历史流转记录
+                    history_record = AssetHistory(
+                        asset_id=asset_to_return.id,
+                        action_type="return",
+                        action_description="离职项安全检查已完成，系统自动退库",
+                        operator_id=current_user.id
+                    )
+                    db.add(history_record)
     
     db.commit()
     

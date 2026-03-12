@@ -211,6 +211,13 @@ const AssetManagement = () => {
       if (payload.purchase_date && dayjs.isDayjs(payload.purchase_date)) {
         payload.purchase_date = payload.purchase_date.format('YYYY-MM-DD')
       }
+      // 业务规则：在库=无使用人，提交时与后端一致
+      if (payload.status === '在库') {
+        payload.user_id = null
+        payload.user_group = null
+        payload.safety_check_executor_id = null
+        payload.safety_check_executor_name = null
+      }
       // 普通用户创建/编辑资产时强制绑定到自己
       // 注意：组长权限控制需要等待后端实现权限校验（任务12）
       if (!isAdminOrLeader && currentUser) {
@@ -493,7 +500,12 @@ const AssetManagement = () => {
         dataIndex: ['user', 'real_name'],
         key: 'user',
         width: 80,
-        render: (_, record) => record.user ? <>{record.user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{record.user.ehr_number}</span>)</> : '在库'
+        render: (_, record) => {
+          const isInStock = record.status === '在库' || record.status === '库存备用'
+          if (isInStock) return '在库'
+          if (record.user) return <>{record.user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{record.user.ehr_number}</span>)</>
+          return <span style={{ color: '#ff4d4f' }}>数据异常：在用无使用人</span>
+        }
       },
       {
         title: '组别',
@@ -773,9 +785,22 @@ const AssetManagement = () => {
               )
             }
             if (field.type === 'select' && field.options) {
+              const isStatus = field.name === 'status'
               return (
                 <Form.Item key={field.name} label={label} name={field.name} rules={rules}>
-                  <Select placeholder={`请选择${field.label}`}>
+                  <Select
+                    placeholder={`请选择${field.label}`}
+                    onChange={isStatus ? (value) => {
+                      if (value === '在库') {
+                        form.setFieldsValue({
+                          user_id: undefined,
+                          user_group: undefined,
+                          safety_check_executor_id: undefined,
+                          safety_check_executor_name: undefined
+                        })
+                      }
+                    } : undefined}
+                  >
                     {field.options.map(opt => (
                       <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>
                     ))}
@@ -789,12 +814,25 @@ const AssetManagement = () => {
               const filteredUsers = isLeader
                 ? users.filter(u => u.group === currentUser?.group)
                 : users
+              const userRules = isUserId ? [
+                { required: false },
+                ({ getFieldValue }) => ({
+                  validator(_, value) {
+                    const status = getFieldValue('status')
+                    if (status === '在用' && !value) return Promise.reject(new Error('状态为在用时，必须选择使用人'))
+                    if (status === '在库' && value) return Promise.reject(new Error('状态为在库时，不能设置使用人'))
+                    return Promise.resolve()
+                  }
+                })
+              ] : undefined
               return (
                 <Form.Item
                   key={field.name}
                   label={label}
                   name={field.name}
-                  extra={isUserId ? '修改使用人将触发安全检查，检查完成后变更才会生效。' : undefined}
+                  dependencies={isUserId ? ['status'] : undefined}
+                  rules={userRules}
+                  extra={isUserId ? '修改使用人将触发安全检查，检查完成后变更才会生效。在库时无需使用人。' : undefined}
                 >
                   <Select
                     allowClear
@@ -894,10 +932,12 @@ const AssetManagement = () => {
                 value = currentAssetDetail.category?.name
                 content = value !== undefined && value !== null && value !== '' ? String(value) : '-'
               } else if (field.name === 'user_id') {
-                if (currentAssetDetail.user?.real_name) {
+                const isInStock = currentAssetDetail.status === '在库' || currentAssetDetail.status === '库存备用'
+                if (isInStock) content = '在库'
+                else if (currentAssetDetail.user?.real_name) {
                   content = <>{currentAssetDetail.user.real_name} (<span style={EHR_LABEL_STYLE}>EHR号：{currentAssetDetail.user.ehr_number}</span>)</>
                 } else {
-                  content = '在库'
+                  content = <span style={{ color: '#ff4d4f' }}>数据异常：在用无使用人</span>
                 }
               } else if (field.name === 'safety_check_executor_id') {
                 const exec = currentAssetDetail.safety_check_executor

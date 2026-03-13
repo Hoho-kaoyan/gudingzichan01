@@ -181,12 +181,21 @@ async def get_tasks(
     ensure_overdue_status_updated(db)
     query = db.query(SafetyCheckTask)
     
-    # 普通用户只能查看分配给自己的任务
+    # 非管理员权限限制
     if current_user.role != "admin":
-        # 查询分配给当前用户的任务
-        query = query.join(TaskAsset).filter(
-            TaskAsset.assigned_user_id == current_user.id
-        ).distinct()
+        if current_user.role == "leader":
+            # 组长：可以看到分配给自己执行的任务，或者资产属于自己组的任务
+            query = query.join(TaskAsset).join(Asset, TaskAsset.asset_id == Asset.id).filter(
+                or_(
+                    TaskAsset.assigned_user_id == current_user.id,
+                    Asset.user_group == current_user.group
+                )
+            ).distinct()
+        else:
+            # 普通用户：只能查看分配给自己的任务
+            query = query.join(TaskAsset).filter(
+                TaskAsset.assigned_user_id == current_user.id
+            ).distinct()
     
     # 状态筛选
     if status:
@@ -279,12 +288,24 @@ async def get_task_detail(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     
-    # 普通用户只能查看分配给自己的任务
+    # 非管理员权限限制
     if current_user.role != "admin":
-        has_access = db.query(TaskAsset).filter(
-            TaskAsset.task_id == task_id,
-            TaskAsset.assigned_user_id == current_user.id
-        ).first()
+        if current_user.role == "leader":
+            # 组长：自己执行的任务，或者包含本组资产的任务
+            has_access = db.query(TaskAsset).join(Asset).filter(
+                TaskAsset.task_id == task_id,
+                or_(
+                    TaskAsset.assigned_user_id == current_user.id,
+                    Asset.user_group == current_user.group
+                )
+            ).first()
+        else:
+            # 普通用户：只能查看分配给自己的任务
+            has_access = db.query(TaskAsset).filter(
+                TaskAsset.task_id == task_id,
+                TaskAsset.assigned_user_id == current_user.id
+            ).first()
+            
         if not has_access:
             raise HTTPException(status_code=403, detail="无权访问此任务")
     
@@ -345,12 +366,24 @@ async def get_task_assets(
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
     
-    # 普通用户只能查看分配给自己的资产（排除已退库的）
-    query = db.query(TaskAsset).filter(TaskAsset.task_id == task_id)
-    if current_user.role != "admin":
+    # 资产列表过滤：排除已退库的。管理员看全集，其他人受限。
+    query = db.query(TaskAsset).join(Asset).filter(TaskAsset.task_id == task_id)
+    if current_user.role == "admin":
+        pass
+    elif current_user.role == "leader":
+        # 组长：看分配给自己的，或者属于本组的资产
+        query = query.filter(
+            or_(
+                TaskAsset.assigned_user_id == current_user.id,
+                Asset.user_group == current_user.group
+            ),
+            TaskAsset.status != "returned"
+        )
+    else:
+        # 普通用户：仅看分配给自己的
         query = query.filter(
             TaskAsset.assigned_user_id == current_user.id,
-            TaskAsset.status != "returned"  # 排除已退库的资产
+            TaskAsset.status != "returned"
         )
     
     task_assets = query.all()

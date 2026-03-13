@@ -130,6 +130,21 @@ async def get_users(
     return [UserResponse.model_validate(user) for user in users]
 
 
+@router.get("/groups", response_model=List[str])
+async def get_all_groups(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """获取所有现有的组别名称（用于前端下拉选择）"""
+    groups = db.query(User.group).filter(
+        User.group.isnot(None), 
+        User.group != "",
+        User.deleted_at.is_(None)
+    ).distinct().all()
+    # groups 返回的是列表的元组，如 [('研发',), ('行政',)]，需要展平
+    return sorted([g[0] for g in groups if g[0]])
+
+
 @router.get("/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,

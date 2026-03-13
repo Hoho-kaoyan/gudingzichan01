@@ -159,7 +159,7 @@ const Layout = () => {
       menuItems.push({
         key: '/safety-check-tasks',
         icon: <FileTextOutlined />,
-        label: '安全检查任务'
+        label: '检查任务管理'
       })
     }
   }

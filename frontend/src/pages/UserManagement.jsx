@@ -19,10 +19,21 @@ const UserManagement = () => {
   const [resigningUser, setResigningUser] = useState(null)
   const [userAssetCount, setUserAssetCount] = useState(0)
   const [markingResignation, setMarkingResignation] = useState(false)
+  const [groups, setGroups] = useState([])
 
   useEffect(() => {
     fetchUsers()
+    fetchGroups()
   }, [])
+
+  const fetchGroups = async () => {
+    try {
+      const response = await api.get('/users/groups')
+      setGroups(response.data || [])
+    } catch (error) {
+      console.error('获取组别列表失败:', error)
+    }
+  }
 
   const fetchUsers = async (extraFilters) => {
     setLoading(true)
@@ -79,15 +90,22 @@ const UserManagement = () => {
 
   const handleSubmit = async (values) => {
     try {
+      // 处理组别字段：Select mode="tags" 返回的是数组，需要转为字符串
+      const payload = { ...values }
+      if (Array.isArray(payload.group)) {
+        payload.group = payload.group[0]
+      }
+
       if (editingUser) {
-        await api.put(`/users/${editingUser.id}`, values)
+        await api.put(`/users/${editingUser.id}`, payload)
         message.success('更新成功')
       } else {
-        await api.post('/users/', values)
+        await api.post('/users/', payload)
         message.success('创建成功')
       }
       setModalVisible(false)
       fetchUsers()
+      fetchGroups() // 刷新组别列表以包含新输入的组别
     } catch (error) {
       message.error(error.response?.data?.detail || '操作失败')
     }
@@ -350,9 +368,20 @@ const UserManagement = () => {
           <Form.Item
             label="组别"
             name="group"
-            rules={[{ required: true, message: '请输入组别' }]}
+            rules={[{ required: true, message: '请输入或选择组别' }]}
           >
-            <Input />
+            <Select
+              showSearch
+              mode="tags"
+              maxCount={1}
+              placeholder="请选择或输入新组别"
+              style={{ width: '100%' }}
+              tokenSeparators={[',', ' ']}
+            >
+              {groups.map(group => (
+                <Select.Option key={group} value={group}>{group}</Select.Option>
+              ))}
+            </Select>
           </Form.Item>
           <Form.Item
             label="角色"

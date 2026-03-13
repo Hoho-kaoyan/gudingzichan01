@@ -9,7 +9,7 @@ const { TextArea } = Input
 const { RangePicker } = DatePicker
 
 const SafetyCheckTaskManagement = () => {
-  const { isAdmin } = useAuth()
+  const { isAdmin, isLeader } = useAuth()
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalVisible, setModalVisible] = useState(false)
@@ -47,12 +47,14 @@ const SafetyCheckTaskManagement = () => {
   const [defaultCheckTypeId, setDefaultCheckTypeId] = useState(null)
 
   useEffect(() => {
-    if (isAdmin) {
+    if (isAdmin || isLeader) {
       fetchTasks()
+    }
+    if (isAdmin) {
       fetchCheckTypes()
       fetchCategories()
     }
-  }, [isAdmin])
+  }, [isAdmin, isLeader])
 
   const fetchTasks = async (filters = {}) => {
     setLoading(true)
@@ -618,15 +620,19 @@ const SafetyCheckTaskManagement = () => {
             placeholder="全部"
             allowClear
           />
-          <Button icon={<SettingOutlined />} onClick={handleOpenTypeManagement}>
-            检查类型管理
-          </Button>
-          <Button icon={<ToolOutlined />} onClick={handleOpenAutoConfig}>
-            联动任务配置
-          </Button>
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
-            发布新任务
-          </Button>
+          {isAdmin && (
+            <>
+              <Button icon={<SettingOutlined />} onClick={handleOpenTypeManagement}>
+                检查类型管理
+              </Button>
+              <Button icon={<ToolOutlined />} onClick={handleOpenAutoConfig}>
+                联动任务配置
+              </Button>
+              <Button type="primary" icon={<PlusOutlined />} onClick={handleCreate}>
+                发布新任务
+              </Button>
+            </>
+          )}
         </Space>
       </div>
 

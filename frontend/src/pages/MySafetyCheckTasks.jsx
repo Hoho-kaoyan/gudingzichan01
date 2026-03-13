@@ -248,12 +248,12 @@ const MySafetyCheckTasks = () => {
           >
             查看详情
           </Button>,
-          (isPending || isOverdue) && (
+          isPending && (
             <Button
               type="primary"
               onClick={() => handleStartCheck(task.task_id)}
             >
-              {isOverdue ? '补检' : '开始检查'}
+              开始检查
             </Button>
           )
         ].filter(Boolean)}
@@ -308,8 +308,12 @@ const MySafetyCheckTasks = () => {
             </div>
           </Card>
         ) : (
-          <Row gutter={[20, 20]}>
-            {displayedTasks.map(task => renderTaskCard(task))}
+          <Row gutter={[24, 24]}>
+            {displayedTasks.map(task => (
+              <Col key={task.task_id} xs={24} sm={12} xl={8}>
+                {renderTaskCard(task)}
+              </Col>
+            ))}
           </Row>
         )}
       </div>

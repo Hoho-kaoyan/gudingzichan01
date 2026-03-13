@@ -43,6 +43,7 @@ const SafetyCheckTaskManagement = () => {
   const [assetNames, setAssetNames] = useState([])
   const [saving, setSaving] = useState(false)
   const [mappingLoading, setMappingLoading] = useState(false)
+  const [mappingSubmitting, setMappingSubmitting] = useState(false)
   const [mappingForm] = Form.useForm()
   const [defaultCheckTypeId, setDefaultCheckTypeId] = useState(null)
 
@@ -447,6 +448,7 @@ const SafetyCheckTaskManagement = () => {
 
   // 提交映射表单（新增或编辑）
   const handleMappingSubmit = async (values) => {
+    setMappingSubmitting(true)
     try {
       if (editingMapping) {
         // 编辑
@@ -470,6 +472,8 @@ const SafetyCheckTaskManagement = () => {
       const errorMsg = error.response?.data?.detail || '操作失败'
       message.error(errorMsg)
       // Modal不关闭，用户可以修改后重试
+    } finally {
+      setMappingSubmitting(false)
     }
   }
 
@@ -1251,6 +1255,7 @@ const SafetyCheckTaskManagement = () => {
           setEditingMapping(null)
         }}
         onOk={() => mappingForm.submit()}
+        confirmLoading={mappingSubmitting}
         width={600}
         destroyOnClose
       >

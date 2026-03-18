@@ -31,11 +31,11 @@ router = APIRouter()
 
 
 def ensure_overdue_status_updated(db: Session) -> None:
-    """
-    方案 B：将截止时间已过且仍为 pending 的任务与任务资产更新为 overdue。
-    待检查数/红点仅统计 pending，不统计 overdue。在 get_tasks / get_my_tasks 前调用。
-    """
-    now = now_east8()
+    # 方案 B：将截止时间已过且仍为 pending 的任务与任务资产更新为 overdue。
+    # 待检查数/红点仅统计 pending，不统计 overdue。在 get_tasks / get_my_tasks 前调用。
+    # 修复：使用 naive UTC 进行对比，与 SQLite 存储口径一致
+    from datetime import timezone
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
     # 任务表：deadline 已过且 status 仍为 pending 的改为 overdue
     overdue_tasks = db.query(SafetyCheckTask).filter(
         SafetyCheckTask.deadline.isnot(None),
@@ -109,6 +109,16 @@ async def create_task(
     ).all()
     if len(assets) != len(task_data.asset_ids):
         raise HTTPException(status_code=400, detail="部分资产不存在或已删除")
+
+    # 验证截止时间（时区归一化修复：防止设置过去的时间，对比口径对齐为 UTC）
+    from datetime import timezone
+    if task_data.deadline:
+        # 将输入的时间转为 naive UTC 进行对比和存储
+        deadline_utc = task_data.deadline.astimezone(timezone.utc).replace(tzinfo=None)
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        if deadline_utc < now_utc:
+            raise HTTPException(status_code=400, detail="截止时间不能早于当前时间")
+        task_data.deadline = deadline_utc # 关键：存入数据库前转为 naive UTC
 
     # 引入重试机制解决并发编号冲突（Bug 13 / B9）
     max_retries = 3
@@ -215,7 +225,7 @@ async def get_tasks(
     tasks_to_update = []  # 需要更新状态的任务列表
     
     for task in tasks:
-        task_dict = SafetyCheckTaskResponse.model_validate(task).model_dump()
+        task_dict = SafetyCheckTaskResponse.model_validate(task).model_dump(mode='json')
         
         # 统计资产数量
         if current_user.role == "admin":

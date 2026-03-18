@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
-from utils_time import now_east8
+from utils_time import now_east8, datetime_to_east8_iso
 from models import (
     TaskAsset, SafetyCheckTask, SafetyCheckType, SafetyCheckHistory, Asset, User
 )
@@ -80,7 +80,7 @@ async def get_my_tasks(
             "check_type": check_type_dict,
             "pending_count": pending_count,
             "overdue_count": overdue_count,
-            "deadline": task.deadline
+            "deadline": datetime_to_east8_iso(task.deadline)
         })
     
     total_pending = sum(it["pending_count"] for it in items)
@@ -128,9 +128,9 @@ async def get_task_assets_for_user(
             "status": ta.status,
             "check_result": ta.check_result,
             "check_comment": ta.check_comment,
-            "checked_at": ta.checked_at,
-            "created_at": ta.created_at,
-            "updated_at": ta.updated_at,
+            "checked_at": datetime_to_east8_iso(ta.checked_at),
+            "created_at": datetime_to_east8_iso(ta.created_at),
+            "updated_at": datetime_to_east8_iso(ta.updated_at),
             "asset": ta.asset,
             "assigned_user": ta.assigned_user
         }
@@ -164,7 +164,7 @@ async def get_task_assets_for_user(
             "task_number": task.task_number,
             "title": task.title,
             "description": task.description,
-            "deadline": task.deadline
+            "deadline": datetime_to_east8_iso(task.deadline)
         },
         "check_type": check_type_dict,
         "assets": assets

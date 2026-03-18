@@ -226,10 +226,10 @@ const SafetyCheckTaskManagement = () => {
     } else if (createStep === 1) {
       // 验证任务信息
       try {
-        await form.validateFields(['title'])
+        await form.validateFields(['title', 'deadline'])
         setCreateStep(2)
       } catch (error) {
-        message.error('请填写任务标题')
+        // validateFields 会自动处理红字显示，这里只需拦截下一步
       }
     }
   }
@@ -257,6 +257,10 @@ const SafetyCheckTaskManagement = () => {
         description: values.description,
         asset_ids: selectedAssets.map(a => a.id),
         deadline: values.deadline ? values.deadline.toISOString() : null
+      }
+      if (payload.deadline && dayjs(payload.deadline).isBefore(dayjs())) {
+        message.error('截止时间不能早于当前时间')
+        return
       }
       await api.post('/safety-check-tasks/', payload)
       message.success('任务创建成功')
@@ -755,12 +759,27 @@ const SafetyCheckTaskManagement = () => {
               <Form.Item
                 name="deadline"
                 label="截止时间"
+                rules={[
+                  {
+                    validator: (_, value) => {
+                      if (value && value.isBefore(dayjs())) {
+                        return Promise.reject(new Error('截止时间不能早于当前时间'));
+                      }
+                      return Promise.resolve();
+                    }
+                  }
+                ]}
               >
                 <DatePicker
                   showTime
                   format="YYYY-MM-DD HH:mm"
                   style={{ width: '100%' }}
                   placeholder="选择截止时间（可选）"
+                  onOk={(value) => {
+                    if (value && value.isBefore(dayjs())) {
+                      message.error('截止时间不能早于当前时间');
+                    }
+                  }}
                 />
               </Form.Item>
 

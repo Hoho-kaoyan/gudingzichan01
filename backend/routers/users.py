@@ -8,7 +8,7 @@ from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
 from models import User, Asset, SafetyCheckTask, TaskAsset
-from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange
+from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange, ImportConflictDetail, ImportConflictDiff, ImportResolveRequest
 from auth import get_current_user, get_current_admin_user, get_password_hash, verify_password
 import pandas as pd
 import io
@@ -17,6 +17,41 @@ from utils_time import now_east8
 from safety_check_linkage import get_check_type_for_asset
 from logger import logger
 import random
+from schemas import ImportErrorDetail
+
+
+def _build_user_import_conflict_diffs(existing_user: User, new_data: dict) -> List[ImportConflictDiff]:
+    """比对数据库现有用户与导入数据的差异"""
+    diffs = []
+    # 映射表：(字段名, 中文显示名)
+    field_map = [
+        ("real_name", "姓名"),
+        ("group", "组别"),
+        ("role", "角色"),
+        ("status", "状态"),
+    ]
+    
+    role_map = {
+        'admin': '管理员',
+        'leader': '组长',
+        'user': '普通用户'
+    }
+
+    for field, label in field_map:
+        db_val = getattr(existing_user, field) or ""
+        import_val = new_data.get(field) or ""
+        
+        # 处理角色显示的特殊变换
+        db_display = role_map.get(db_val, db_val) if field == "role" else db_val
+        import_display = role_map.get(import_val, import_val) if field == "role" else import_val
+        
+        if str(db_val).strip() != str(import_val).strip():
+            diffs.append(ImportConflictDiff(
+                field_label=label,
+                db_value=str(db_display),
+                import_value=str(import_display)
+            ))
+    return diffs
 
 
 def _create_resignation_safety_tasks(db: Session, user: User, current_user_id: int) -> None:
@@ -347,8 +382,11 @@ async def import_users(
         
         success_count = 0
         error_count = 0
+        skip_count = 0
         errors = []
         error_details = []
+        conflict_count = 0
+        conflict_details = []
         
         for index, row in df.iterrows():
             row_number = index + 2  # Excel行号（从2开始，第1行是表头）
@@ -363,6 +401,11 @@ async def import_users(
                 status = cell_to_str(row.get('状态', '')) or '在岗'
                 password = cell_to_str(row.get('密码', '')) or '123456'
                 
+                # 状态合法性校验
+                valid_statuses = {"在岗", "离职", "长期出差", "借调", "产假"}
+                if status and status not in valid_statuses:
+                    raise ValueError(f"状态 '{status}' 不合法，可选范围：{'/'.join(sorted(list(valid_statuses)))}")
+
                 if not ehr_number or not real_name or not group:
                     raise ValueError("EHR号、姓名、组别均不能为空")
                 
@@ -378,13 +421,29 @@ async def import_users(
                     })
                     continue
                 
-                # 按EHR号查库（含已逻辑删除）：未删除则报已存在，已删除则恢复并更新
+                # 按EHR号查库（含已逻辑删除）：未删除则比对冲突，已删除则恢复并更新
                 existing_user = db.query(User).filter(User.ehr_number == ehr_number).first()
                 if existing_user and existing_user.deleted_at is None:
-                    error_count += 1
-                    error_msg = f"EHR号{ehr_number}已存在"
-                    errors.append(f"第{row_number}行：{error_msg}")
-                    error_details.append({"row_number": row_number, "error_message": error_msg, "row_data": row_to_error_dict(row_data)})
+                    parsed_data = {
+                        "real_name": real_name,
+                        "group": group,
+                        "role": role,
+                        "status": status,
+                        "password": password # 虽然不比对，但解决冲突覆盖时可能用到
+                    }
+                    diffs = _build_user_import_conflict_diffs(existing_user, parsed_data)
+                    if not diffs:
+                        skip_count += 1
+                        continue
+                    
+                    conflict_count += 1
+                    conflict_details.append(ImportConflictDetail(
+                        row_number=row_number,
+                        asset_number=ehr_number, # 这里借用字段存放 EHR 号
+                        asset_id=existing_user.id, # 这里借用字段存放 User ID
+                        diffs=diffs,
+                        row_data=row_to_error_dict(row_data)
+                    ))
                     continue
                 
                 if existing_user and existing_user.deleted_at is not None:
@@ -432,9 +491,61 @@ async def import_users(
         return ImportResponse(
             success_count=success_count,
             error_count=error_count,
+            skip_count=skip_count,
             errors=limited_errors,
-            error_details=limited_error_details
+            error_details=limited_error_details,
+            conflict_count=conflict_count,
+            conflict_details=conflict_details[:100]
         )
         
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"导入失败：{str(e)}")
+
+
+@router.post("/import-resolve")
+async def resolve_user_import_conflicts(
+    body: ImportResolveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """
+    解决用户导入冲突：选择「覆盖」则更新用户信息，选择「保持」则忽略。
+    """
+    overwrite_count = 0
+    errors_resolve = []
+    
+    for d in body.decisions:
+        user = db.query(User).filter(User.id == d.asset_id, User.deleted_at.is_(None)).first()
+        if not user:
+            errors_resolve.append(f"用户ID {d.asset_id} 不存在或已删除，已跳过")
+            continue
+        
+        if d.action == "keep":
+            continue
+            
+        if d.action != "overwrite" or not d.row_data:
+            errors_resolve.append(f"用户 {user.ehr_number}：覆盖操作需要提供行数据")
+            continue
+            
+        try:
+            # 解析 row_data
+            row = d.row_data
+            user.real_name = cell_to_str(row.get('姓名', user.real_name))
+            user.group = cell_to_str(row.get('组别', user.group))
+            user.role = cell_to_str(row.get('角色', user.role))
+            user.status = cell_to_str(row.get('状态', user.status))
+            
+            pwd = cell_to_str(row.get('密码', ''))
+            if pwd and pwd != '123456': # 如果提供了非默认密码，则更新
+                user.password_hash = get_password_hash(pwd)
+            
+            overwrite_count += 1
+        except Exception as e:
+            errors_resolve.append(f"更新用户 {user.ehr_number} 失败：{str(e)}")
+            
+    db.commit()
+    return {
+        "message": f"已处理 {len(body.decisions)} 条冲突，其中覆盖更新 {overwrite_count} 条",
+        "overwrite_count": overwrite_count,
+        "errors": errors_resolve
+    }

@@ -15,11 +15,14 @@ const UserManagement = () => {
   const [filters, setFilters] = useState({})
   const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
   const [importErrors, setImportErrors] = useState([])
+  const [markingResignation, setMarkingResignation] = useState(false)
   const [resignationModalVisible, setResignationModalVisible] = useState(false)
   const [resigningUser, setResigningUser] = useState(null)
   const [userAssetCount, setUserAssetCount] = useState(0)
-  const [markingResignation, setMarkingResignation] = useState(false)
   const [groups, setGroups] = useState([])
+  const [importConflictModalVisible, setImportConflictModalVisible] = useState(false)
+  const [importConflicts, setImportConflicts] = useState([])
+  const [resolvingConflict, setResolvingConflict] = useState(false)
 
   useEffect(() => {
     fetchUsers()
@@ -119,7 +122,15 @@ const UserManagement = () => {
       const response = await api.post('/users/import', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
-      const { success_count, error_count, errors, error_details } = response.data
+      const {
+        success_count,
+        error_count,
+        skip_count,
+        errors,
+        error_details,
+        conflict_count,
+        conflict_details
+      } = response.data
 
       if (error_count > 0) {
         // 如果有错误，显示错误详情模态框
@@ -129,15 +140,54 @@ const UserManagement = () => {
           row_data: {}
         })))
         setImportErrorModalVisible(true)
-        message.warning(`导入完成：成功 ${success_count} 条，失败 ${error_count} 条，请查看失败详情`)
+      }
+
+      if (conflict_count > 0) {
+        setImportConflicts(conflict_details || [])
+        setImportConflictModalVisible(true)
+      }
+
+      const parts = [`成功 ${success_count} 条`]
+      if (skip_count > 0) parts.push(`已存在且一致跳过 ${skip_count} 条`)
+      if (error_count > 0) parts.push(`失败 ${error_count} 条，请查看失败详情`)
+      if (conflict_count > 0) parts.push(`${conflict_count} 条与数据库有差异，请选择覆盖或保持`)
+
+      if (error_count > 0 || conflict_count > 0) {
+        message.warning(`导入完成：${parts.join('；')}`)
       } else {
-        message.success(`导入完成：成功 ${success_count} 条`)
+        message.success(`导入完成：${parts.join('；')}`)
       }
       fetchUsers(filters)
+      fetchGroups()
     } catch (error) {
       message.error(error.response?.data?.detail || '导入失败')
     }
     return false // 阻止自动上传
+  }
+
+  // 处理冲突解决
+  const handleResolveUserConflict = async (item, action) => {
+    const payload = {
+      decisions: [{
+        asset_id: item.asset_id, // 这里后端借用了 asset_id 传 User ID
+        action,
+        row_data: action === 'overwrite' ? item.row_data : undefined
+      }]
+    }
+    try {
+      await api.post('/users/import-resolve', payload)
+      setImportConflicts((prev) => {
+        const next = prev.filter((c) => c.asset_id !== item.asset_id)
+        if (next.length === 0) setImportConflictModalVisible(false)
+        return next
+      })
+      if (action === 'overwrite') {
+        message.success(`已用导入数据覆盖更新用户 (EHR: ${item.asset_number})`)
+        fetchUsers()
+      }
+    } catch (err) {
+      message.error(err.response?.data?.detail || '操作失败')
+    }
   }
 
   // 获取用户资产数量
@@ -584,6 +634,82 @@ const UserManagement = () => {
               )}
             </ol>
           </div>
+        </div>
+      </Modal>
+
+      {/* 导入冲突：与数据库有差异，用户选择覆盖或保持 */}
+      <Modal
+        title="导入冲突：请选择覆盖或保持"
+        open={importConflictModalVisible}
+        onCancel={() => {
+          setImportConflictModalVisible(false)
+          setImportConflicts([])
+        }}
+        footer={[
+          <Button
+            key="close"
+            onClick={() => {
+              setImportConflictModalVisible(false)
+              setImportConflicts([])
+            }}
+          >
+            关闭项目
+          </Button>
+        ]}
+        width={800}
+      >
+        <Alert
+          message="以下用户在数据库中已存在，且部分字段（如姓名、组别、角色）与导入数据不一致。请逐条选择「覆盖」用导入数据更新，或「保持」保留数据库原值。"
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+        <div style={{ maxHeight: 480, overflow: 'auto' }}>
+          {importConflicts.map((item) => (
+            <div
+              key={item.asset_id}
+              style={{
+                border: '1px solid #d9d9d9',
+                borderRadius: 8,
+                padding: 12,
+                marginBottom: 12,
+                background: '#fafafa'
+              }}
+            >
+              <div style={{ marginBottom: 8, fontWeight: 500 }}>
+                第 {item.row_number} 行 · EHR号：{item.asset_number}
+              </div>
+              <Table
+                dataSource={item.diffs || []}
+                rowKey={(r) => r.field_label}
+                size="small"
+                pagination={false}
+                columns={[
+                  { title: '字段', dataIndex: 'field_label', key: 'field_label', width: 140 },
+                  {
+                    title: '系统中当前值',
+                    dataIndex: 'db_value',
+                    key: 'db_value',
+                    render: (t) => <span style={{ color: '#1890ff' }}>{t || '(空)'}</span>
+                  },
+                  {
+                    title: '导入文件中的值',
+                    dataIndex: 'import_value',
+                    key: 'import_value',
+                    render: (t) => <span style={{ color: '#52c41a' }}>{t || '(空)'}</span>
+                  }
+                ]}
+              />
+              <Space style={{ marginTop: 8 }}>
+                <Button type="primary" size="small" onClick={() => handleResolveUserConflict(item, 'overwrite')}>
+                  覆盖（用导入数据更新）
+                </Button>
+                <Button size="small" onClick={() => handleResolveUserConflict(item, 'keep')}>
+                  保持（不改动数据库）
+                </Button>
+              </Space>
+            </div>
+          ))}
         </div>
       </Modal>
     </div>

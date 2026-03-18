@@ -36,13 +36,15 @@ def _normalize_and_validate_status_user_id(status: str, user_id: Optional[int], 
     - status 为「在用」时：若 user_id 为空则抛出 ValueError。
     返回 (status, user_id, user_group) 供写入数据库。
     """
-    if status == "在库" or status == "库存备用":
+    if status == "在库":
         return ("在库", None, None)
     if status == "在用":
         if user_id is None:
             raise ValueError("状态为在用时，必须指定使用人")
         return (status, user_id, user_group or None)
-    return (status, user_id, user_group)
+    
+    valid_statuses = {"在用", "在库"}
+    raise ValueError(f"状态 '{status}' 不合法，可选范围：{'/'.join(sorted(list(valid_statuses)))}")
 
 
 # 导入冲突比对：资产字段名 -> 中文标签（用于展示差异）
@@ -157,8 +159,9 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
         db.flush()
     specification = _get_rd(row_data, "规格型号") or None
     status = _get_rd(row_data, "实物状态", "状态") or "在用"
-    if status == "库存备用":
-        status = "在库"
+    valid_statuses = {"在用", "在库"}
+    if status and status not in valid_statuses:
+        raise ValueError(f"状态 '{status}' 不合法，可选范围：{'/'.join(sorted(list(valid_statuses)))}")
     available_status = _get_rd(row_data, "可用状态") or "可用"
     if available_status not in ("可用", "维修中", "已报废"):
         available_status = "可用"
@@ -957,13 +960,14 @@ async def import_assets(
                     specification = row_cell_str(row, df.columns, '规格型号') or None
                     # 状态：优先读「实物状态」，若无则读「状态」；只允许在用/在库/库存备用
                     status_raw = row_cell_str(row, df.columns, '实物状态', '状态') or '在用'
-                    if status_raw not in ('在用', '在库', '库存备用'):
-                        raise ValueError(f"状态必须是：在用、在库、库存备用，当前为「{status_raw}」")
+                    valid_statuses = {"在用", "在库"}
+                    if status_raw and status_raw not in valid_statuses:
+                        raise ValueError(f"状态 '{status_raw}' 不合法，可选范围：{'/'.join(sorted(list(valid_statuses)))}")
                     
-                    status = '在库' if status_raw == '库存备用' else status_raw
+                    status = status_raw
                     available_status_raw = row_cell_str(row, df.columns, '可用状态') or '可用'
-                    if available_status_raw not in ('可用', '维修中', '已报废'):
-                        available_status_raw = '可用'
+                    # 注意：为了让“可用状态”的变动能触发冲突比对，我们先不在这里进行强力修正。
+                    # 只有在最终确定写入（新增或覆盖）时再应用容错逻辑。
                     available_status = available_status_raw
                     mac_address = row_cell_str(row, df.columns, '终端mac地址', 'MAC地址') or None
                     ip_address = row_cell_str(row, df.columns, '终端IP号', 'IP地址') or None
@@ -1133,7 +1137,7 @@ async def import_assets(
                             except Exception as e:
                                 logger.error(f"批量导入恢复资产时触发系统安检任务下发失败: {e}", exc_info=True)
                         success_count += 1
-                        return # 继续下一行
+                        continue # 继续下一行
                     
                     # 不存在：新增
                     db_asset = Asset(
@@ -1142,7 +1146,7 @@ async def import_assets(
                         name=name,
                         specification=specification or None,
                         status=status,
-                        available_status=available_status,
+                        available_status=available_status if available_status in ('可用', '维修中', '已报废') else '可用',
                         mac_address=mac_address or None,
                         ip_address=ip_address or None,
                         office_location=office_location or None,

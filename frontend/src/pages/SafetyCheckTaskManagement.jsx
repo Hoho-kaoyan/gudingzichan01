@@ -251,12 +251,22 @@ const SafetyCheckTaskManagement = () => {
         setCreateStep(1)
         return
       }
+      let normalizedDeadline = null
+      if (values.deadline) {
+        // 防止仅选日期导致默认 00:00，当天任务立即被判定为逾期
+        const picked = dayjs(values.deadline)
+        const asEndOfDay = picked.hour() === 0 && picked.minute() === 0 && picked.second() === 0
+          ? picked.endOf('day')
+          : picked
+        // 保留本地时区偏移，避免 toISOString() 转 UTC 造成语义偏差
+        normalizedDeadline = asEndOfDay.format('YYYY-MM-DDTHH:mm:ssZ')
+      }
       const payload = {
         check_type_id: values.check_type_id,
         title: values.title,
         description: values.description,
         asset_ids: selectedAssets.map(a => a.id),
-        deadline: values.deadline ? values.deadline.toISOString() : null
+        deadline: normalizedDeadline
       }
       if (payload.deadline && dayjs(payload.deadline).isBefore(dayjs())) {
         message.error('截止时间不能早于当前时间')

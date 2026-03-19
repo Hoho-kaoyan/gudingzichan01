@@ -14,7 +14,7 @@ import io
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
-from utils_time import now_east8
+from utils_time import now_east8, TZ_EAST_8
 from models import (
     SafetyCheckTask, SafetyCheckType, TaskAsset, Asset, User
 )
@@ -33,23 +33,31 @@ router = APIRouter()
 def ensure_overdue_status_updated(db: Session) -> None:
     # 方案 B：将截止时间已过且仍为 pending 的任务与任务资产更新为 overdue。
     # 待检查数/红点仅统计 pending，不统计 overdue。在 get_tasks / get_my_tasks 前调用。
-    # 修复：使用 naive UTC 进行对比，与 SQLite 存储口径一致
-    from datetime import timezone
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
-    # 任务表：deadline 已过且 status 仍为 pending 的改为 overdue
-    overdue_tasks = db.query(SafetyCheckTask).filter(
+    # 统一在 Python 层按东八区比较，避免 SQLite 对 datetime 时区语义不稳定。
+    now = now_east8()
+    pending_tasks = db.query(SafetyCheckTask).filter(
         SafetyCheckTask.deadline.isnot(None),
-        SafetyCheckTask.deadline < now,
         SafetyCheckTask.status == "pending"
     ).all()
-    for task in overdue_tasks:
-        task.status = "overdue"
-        # 该任务下仍为 pending 的 TaskAsset 改为 overdue
+
+    overdue_task_ids: List[int] = []
+    for task in pending_tasks:
+        deadline = task.deadline
+        if deadline is None:
+            continue
+        if deadline.tzinfo is None:
+            deadline = deadline.replace(tzinfo=TZ_EAST_8)
+        else:
+            deadline = deadline.astimezone(TZ_EAST_8)
+        if deadline < now:
+            task.status = "overdue"
+            overdue_task_ids.append(task.id)
+
+    if overdue_task_ids:
         db.query(TaskAsset).filter(
-            TaskAsset.task_id == task.id,
+            TaskAsset.task_id.in_(overdue_task_ids),
             TaskAsset.status == "pending"
         ).update({TaskAsset.status: "overdue"}, synchronize_session="fetch")
-    if overdue_tasks:
         db.commit()
 
 

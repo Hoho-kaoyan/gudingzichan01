@@ -8,7 +8,7 @@ from datetime import datetime, date
 from enum import Enum
 import json
 
-from utils_time import datetime_to_east8_iso
+from utils_time import datetime_to_east8_iso, TZ_EAST_8
 
 
 def _serialize_east8(v: Optional[datetime]) -> Optional[str]:
@@ -431,6 +431,16 @@ class SafetyCheckTaskCreate(BaseModel):
             return None
         return v
 
+    @field_validator("deadline", mode="after")
+    @classmethod
+    def normalize_deadline(cls, v):
+        if v is None:
+            return None
+        if v.tzinfo is None:
+            # 兼容未带时区的输入，按东八区业务时间解释
+            return v.replace(tzinfo=TZ_EAST_8)
+        return v.astimezone(TZ_EAST_8)
+
 
 class SafetyCheckTaskUpdate(BaseModel):
     title: Optional[str] = None
@@ -444,6 +454,15 @@ class SafetyCheckTaskUpdate(BaseModel):
         if v in (None, "", "null"):
             return None
         return v
+
+    @field_validator("deadline", mode="after")
+    @classmethod
+    def normalize_deadline(cls, v):
+        if v is None:
+            return None
+        if v.tzinfo is None:
+            return v.replace(tzinfo=TZ_EAST_8)
+        return v.astimezone(TZ_EAST_8)
 
 
 class SafetyCheckTaskResponse(BaseModel):

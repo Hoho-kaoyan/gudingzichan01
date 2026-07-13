@@ -61,5 +61,6 @@ async def login(
     return LoginResponse(
         access_token=access_token,
         token_type="bearer",
-        user=UserResponse.model_validate(user)
+        user=UserResponse.model_validate(user),
+        require_password_change=user.must_change_password
     )

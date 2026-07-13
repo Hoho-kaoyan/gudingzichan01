@@ -55,7 +55,8 @@ class User(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     deleted_at = Column(DateTime(timezone=True), nullable=True, comment="删除时间（软删除）")
     deleted_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="删除人ID")
-    
+    must_change_password = Column(Boolean, default=True, nullable=False, comment="是否需要修改密码（首次登录强制修改）")
+
     # 关系
     assets = relationship("Asset", back_populates="user", foreign_keys="Asset.user_id")
     transfer_requests = relationship("TransferRequest", back_populates="from_user", foreign_keys="TransferRequest.from_user_id")

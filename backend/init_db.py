@@ -13,21 +13,21 @@ INITIAL_USERS = [
         "real_name": "系统管理员",
         "group": "管理组",
         "role": "admin",
-        "password": "1234567"
+        "password": "Aa@1234567"
     },
     {
         "ehr_number": "1234567",
         "real_name": "测试组长1",
         "group": "测试组",
         "role": "leader",
-        "password": "1234567"
+        "password": "Aa@1234567"
     },
     {
         "ehr_number": "1234568",
         "real_name": "测试用户1",
         "group": "测试组",
         "role": "user",
-        "password": "1234567"
+        "password": "Aa@1234567"
     }
 ]
 

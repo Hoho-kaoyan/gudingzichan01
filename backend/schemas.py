@@ -7,6 +7,7 @@ from typing import Optional, List, Literal, Annotated
 from datetime import datetime, date
 from enum import Enum
 import json
+import re
 
 from utils_time import datetime_to_east8_iso, TZ_EAST_8
 
@@ -39,7 +40,22 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6, description="密码")
+    password: str = Field(..., min_length=8, description="密码")
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        if len(v) < 8:
+            raise ValueError('密码至少8位')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('密码必须包含大写字母')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('密码必须包含小写字母')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('密码必须包含数字')
+        if not re.search(r'[@#$%^&]', v):
+            raise ValueError('密码必须包含特殊字符(@#$%^&)')
+        return v
 
 
 class UserUpdate(BaseModel):
@@ -53,7 +69,22 @@ class UserUpdate(BaseModel):
 class PasswordChange(BaseModel):
     """当前用户修改自己的密码"""
     old_password: str = Field(..., description="原密码")
-    new_password: str = Field(..., min_length=6, description="新密码")
+    new_password: str = Field(..., min_length=8, description="新密码")
+
+    @field_validator('new_password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        if len(v) < 8:
+            raise ValueError('密码至少8位')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('密码必须包含大写字母')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('密码必须包含小写字母')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('密码必须包含数字')
+        if not re.search(r'[@#$%^&]', v):
+            raise ValueError('密码必须包含特殊字符(@#$%^&)')
+        return v
 
 
 class UserResponse(UserBase):
@@ -90,6 +121,7 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+    require_password_change: bool = False
 
 
 # 资产大类模式

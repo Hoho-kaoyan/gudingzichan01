@@ -16,6 +16,7 @@ export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [token, setToken] = useState(localStorage.getItem('token'))
+  const [requirePasswordChange, setRequirePasswordChange] = useState(false)
 
   useEffect(() => {
     if (token) {
@@ -47,11 +48,12 @@ export const AuthProvider = ({ children }) => {
         ehr_number: ehrNumber,
         password: password
       })
-      const { access_token, user: userData } = response.data
+      const { access_token, user: userData, require_password_change } = response.data
       localStorage.setItem('token', access_token)
       setToken(access_token)
       api.defaults.headers.common['Authorization'] = `Bearer ${access_token}`
       setUser(userData)
+      setRequirePasswordChange(require_password_change)
       message.success('登录成功')
       return true
     } catch (error) {
@@ -65,6 +67,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.removeItem('token')
     setToken(null)
     setUser(null)
+    setRequirePasswordChange(false)
     delete api.defaults.headers.common['Authorization']
     message.success('已退出登录')
   }
@@ -86,6 +89,8 @@ export const AuthProvider = ({ children }) => {
     login,
     logout,
     checkEHR,
+    requirePasswordChange,
+    setRequirePasswordChange,
     isAdmin: user?.role === 'admin',
     isLeader: user?.role === 'leader',
     isAdminOrLeader: user?.role === 'admin' || user?.role === 'leader'

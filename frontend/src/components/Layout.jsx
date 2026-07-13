@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge, Modal, Form, Input, message } from 'antd'
 import {
@@ -52,7 +52,7 @@ const Layout = () => {
   }
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, logout, isAdmin, isLeader } = useAuth()
+  const { user, logout, isAdmin, isLeader, requirePasswordChange, setRequirePasswordChange } = useAuth()
 
   const handlePasswordSubmit = async () => {
     try {
@@ -68,6 +68,7 @@ const Layout = () => {
       })
       message.success('密码修改成功')
       setPasswordModalVisible(false)
+      setRequirePasswordChange(false)
       passwordForm.resetFields()
     } catch (error) {
       if (error.response?.status === 400 && error.response?.data?.detail === '原密码错误') {
@@ -80,6 +81,13 @@ const Layout = () => {
     }
   }
   const { pendingTransferConfirmCount, pendingApprovalCount, pendingSafetyCheckCount } = useTransfer()
+
+  // 首次登录强制修改密码
+  useEffect(() => {
+    if (requirePasswordChange) {
+      setPasswordModalVisible(true)
+    }
+  }, [requirePasswordChange])
 
   // 与资产交接同一套：有数量时显示小橙点 Badge（#fa8c16）
   const renderLabelWithOrangeBadge = (label, count) => {
@@ -231,19 +239,32 @@ const Layout = () => {
       </AntLayout>
 
       <Modal
-        title="修改密码"
+        title="首次登录必须修改密码"
         open={passwordModalVisible}
-        onCancel={() => { setPasswordModalVisible(false); passwordForm.resetFields() }}
+        onCancel={() => { setPasswordModalVisible(false); passwordForm.resetFields(); logout() }}
         onOk={handlePasswordSubmit}
         confirmLoading={passwordSubmitting}
         destroyOnClose
+        maskClosable={false}
+        closable={false}
       >
         <Form form={passwordForm} layout="vertical">
           <Form.Item name="old_password" label="原密码" rules={[{ required: true, message: '请输入原密码' }]}>
             <Input.Password placeholder="请输入原密码" />
           </Form.Item>
-          <Form.Item name="new_password" label="新密码" rules={[{ required: true, message: '请输入新密码' }, { min: 6, message: '至少6位' }]}>
-            <Input.Password placeholder="请输入新密码（至少6位）" />
+          <Form.Item
+            name="new_password"
+            label="新密码"
+            rules={[
+              { required: true, message: '请输入新密码' },
+              { min: 8, message: '密码至少8位' },
+              { pattern: /[A-Z]/, message: '密码必须包含大写字母' },
+              { pattern: /[a-z]/, message: '密码必须包含小写字母' },
+              { pattern: /[0-9]/, message: '密码必须包含数字' },
+              { pattern: /[@#$%^&]/, message: '密码必须包含特殊字符(@#$%^&)' }
+            ]}
+          >
+            <Input.Password placeholder="请输入新密码（8位以上，包含大小写字母、数字、特殊字符）" />
           </Form.Item>
           <Form.Item name="confirm_password" label="确认新密码" rules={[{ required: true, message: '请再次输入新密码' }]}>
             <Input.Password placeholder="请再次输入新密码" />

@@ -126,6 +126,7 @@ async def change_my_password(
     if not verify_password(body.old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="原密码错误")
     current_user.password_hash = get_password_hash(body.new_password)
+    current_user.must_change_password = False
     db.commit()
     return {"message": "密码修改成功"}
 
@@ -399,7 +400,7 @@ async def import_users(
                 group = cell_to_str(row.get('组别', ''))
                 role = cell_to_str(row.get('角色', '')) or 'user'
                 status = cell_to_str(row.get('状态', '')) or '在岗'
-                password = cell_to_str(row.get('密码', '')) or '123456'
+                password = cell_to_str(row.get('密码', '')) or 'Aa@1234567'
                 
                 # 状态合法性校验
                 valid_statuses = {"在岗", "离职", "长期出差", "借调", "产假"}
@@ -466,7 +467,8 @@ async def import_users(
                     group=group,
                     role=role,
                     status=status,
-                    password_hash=hashed_password
+                    password_hash=hashed_password,
+                    must_change_password=True
                 )
                 db.add(db_user)
                 success_count += 1

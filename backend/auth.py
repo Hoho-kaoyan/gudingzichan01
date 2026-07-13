@@ -69,6 +69,9 @@ def authenticate_user(db: Session, ehr_number: str, password: str) -> Optional[U
         return None
     if not verify_password(password, user.password_hash):
         return None
+    # 离职用户不允许登录
+    if user.status == "离职":
+        return None
     return user
 
 

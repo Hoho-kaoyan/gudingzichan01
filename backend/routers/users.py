@@ -239,6 +239,9 @@ async def mark_user_resignation(
     if user.status == "离职":
         raise HTTPException(status_code=400, detail="该用户已经是离职状态")
 
+    if user.role == "admin":
+        raise HTTPException(status_code=400, detail="不能标记管理员为离职")
+
     # 【新增：强级拦截】离职前检查是否还负责他人的安检执行工作
     is_executor_for_others = db.query(Asset).filter(
         Asset.safety_check_executor_id == user_id,

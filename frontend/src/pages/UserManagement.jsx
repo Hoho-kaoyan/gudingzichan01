@@ -294,7 +294,7 @@ const UserManagement = () => {
             <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
               编辑
             </Button>
-            {record.status !== '离职' && (
+            {record.status !== '离职' && record.role !== 'admin' && (
               <Button
                 type="link"
                 danger

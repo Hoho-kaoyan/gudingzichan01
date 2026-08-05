@@ -13,6 +13,16 @@ def now_east8() -> datetime:
     return datetime.now(TZ_EAST_8)
 
 
+def now_utc_naive() -> datetime:
+    """
+    当前时间（UTC，无时区信息）。
+    用于写入数据库，与 func.now()（UTC）保持一致。
+    注意：序列化时 datetime_to_east8_iso 会把 naive 视为 UTC 再转东八区，
+    因此入库时间必须存 UTC naive，避免出现「东八区时间被再次 +8」的问题。
+    """
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 def datetime_to_east8_iso(dt: Optional[datetime]) -> Optional[str]:
     """
     将 datetime 转为东八区后的 ISO 字符串（带 +08:00），用于 API 序列化。

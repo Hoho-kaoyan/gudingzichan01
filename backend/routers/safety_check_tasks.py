@@ -14,7 +14,7 @@ import io
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
-from utils_time import now_east8, TZ_EAST_8
+from utils_time import now_east8, now_utc_naive, TZ_EAST_8
 from models import (
     SafetyCheckTask, SafetyCheckType, TaskAsset, Asset, User
 )
@@ -264,7 +264,7 @@ async def get_tasks(
                 if task.completed_at:
                     task_dict["completed_at"] = task.completed_at
                 else:
-                    task_dict["completed_at"] = now_east8()
+                    task_dict["completed_at"] = now_utc_naive()
         else:
             # 普通用户：显示自己的资产统计（排除已退库的）
             my_assets = db.query(TaskAsset).filter(
@@ -284,7 +284,7 @@ async def get_tasks(
         for task in tasks_to_update:
             task.status = "completed"
             if not task.completed_at:
-                task.completed_at = now_east8()
+                task.completed_at = now_utc_naive()
         db.commit()
     
     return {
@@ -355,7 +355,7 @@ async def get_task_detail(
         if total_assets > 0 and completed_assets == total_assets and task.status != "completed":
             task.status = "completed"
             if not task.completed_at:
-                task.completed_at = now_east8()
+                task.completed_at = now_utc_naive()
             db.commit()
             task_dict["status"] = "completed"
             task_dict["completed_at"] = task.completed_at
@@ -590,7 +590,7 @@ async def update_task(
     if task_data.status:
         task.status = task_data.status
         if task_data.status == "completed":
-            task.completed_at = now_east8()
+            task.completed_at = now_utc_naive()
     
     db.commit()
     db.refresh(task)

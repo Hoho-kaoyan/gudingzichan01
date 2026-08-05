@@ -14,7 +14,7 @@ from logger import logger
 def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
-from utils_time import now_east8
+from utils_time import now_east8, now_utc_naive
 
 router = APIRouter()
 
@@ -53,7 +53,7 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = now_east8()
+        request.approved_at = now_utc_naive()
         
         # 如果批准，更新资产信息
         if approval_data.approved:
@@ -151,7 +151,7 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = now_east8()
+        request.approved_at = now_utc_naive()
         
         # 如果批准，根据申请人修改的内容更新资产信息
         if approval_data.approved:
@@ -265,7 +265,7 @@ async def approve_request(
         request.status = "approved" if approval_data.approved else "rejected"
         request.approver_id = current_user.id
         request.approval_comment = approval_data.comment
-        request.approved_at = now_east8()
+        request.approved_at = now_utc_naive()
         
         # 如果批准，更新资产信息
         if approval_data.approved:

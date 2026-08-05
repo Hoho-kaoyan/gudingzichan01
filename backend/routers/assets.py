@@ -23,7 +23,7 @@ def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 from datetime import datetime, date
-from utils_time import now_east8
+from utils_time import now_east8, now_utc_naive
 from safety_check_linkage import create_system_allocated_task
 
 router = APIRouter()
@@ -864,7 +864,7 @@ async def delete_asset(
         raise HTTPException(status_code=400, detail="资产已被删除")
     
     # 软删除：设置删除时间和删除人
-    asset.deleted_at = now_east8()
+    asset.deleted_at = now_utc_naive()
     asset.deleted_by_id = current_user.id
     
     logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 删除资产: {asset.asset_number} - {asset.name}")

@@ -13,7 +13,7 @@ from auth import get_current_user, get_current_admin_user, get_password_hash, ve
 import pandas as pd
 import io
 from excel_io import cell_to_str, row_to_error_dict
-from utils_time import now_east8
+from utils_time import now_east8, now_utc_naive
 from safety_check_linkage import get_check_type_for_asset
 from logger import logger
 import random
@@ -353,7 +353,7 @@ async def delete_user(
     if is_executor_for_assets:
         raise HTTPException(status_code=400, detail="该用户已被登记为其他资产的检查执行人，不可删除")
     
-    user.deleted_at = now_east8()
+    user.deleted_at = now_utc_naive()
     user.deleted_by_id = current_user.id
     db.commit()
     return {"message": "用户已删除"}

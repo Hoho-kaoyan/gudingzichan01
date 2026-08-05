@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime
 from database import get_db
-from utils_time import now_east8, datetime_to_east8_iso
+from utils_time import now_east8, now_utc_naive, datetime_to_east8_iso
 from models import (
     TaskAsset, SafetyCheckTask, SafetyCheckType, SafetyCheckHistory, Asset, User
 )
@@ -225,7 +225,7 @@ async def submit_check_result(
     task_asset.status = "checked"
     task_asset.check_result = result_data.check_result
     task_asset.check_comment = result_data.check_comment
-    task_asset.checked_at = now_east8()
+    task_asset.checked_at = now_utc_naive()
     
     # 保存检查项结果
     items_result = [
@@ -249,7 +249,7 @@ async def submit_check_result(
         checked_by_id=current_user.id,
         check_result=result_data.check_result,
         check_comment=result_data.check_comment,
-        checked_at=now_east8()
+        checked_at=now_utc_naive()
     )
     history.set_check_items_result(items_result)
     db.add(history)
@@ -263,7 +263,7 @@ async def submit_check_result(
     
     if pending_count == 0:
         task.status = "completed"
-        task.completed_at = now_east8()
+        task.completed_at = now_utc_naive()
         
         # 【新增：检测有无延迟生效的调拨记录，若有则立刻放行生效】
         if task.source == "reallocation":

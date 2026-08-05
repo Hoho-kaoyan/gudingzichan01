@@ -53,8 +53,8 @@ class UserCreate(UserBase):
             raise ValueError('密码必须包含小写字母')
         if not re.search(r'[0-9]', v):
             raise ValueError('密码必须包含数字')
-        if not re.search(r'[@#$%^&]', v):
-            raise ValueError('密码必须包含特殊字符(@#$%^&)')
+        if not re.search(r'[^\w]', v):
+            raise ValueError('密码必须包含特殊字符（非字母、数字、下划线的符号，如 @ # $ 等）')
         return v
 
 
@@ -82,8 +82,8 @@ class PasswordChange(BaseModel):
             raise ValueError('密码必须包含小写字母')
         if not re.search(r'[0-9]', v):
             raise ValueError('密码必须包含数字')
-        if not re.search(r'[@#$%^&]', v):
-            raise ValueError('密码必须包含特殊字符(@#$%^&)')
+        if not re.search(r'[^\w]', v):
+            raise ValueError('密码必须包含特殊字符（非字母、数字、下划线的符号，如 @ # $ 等）')
         return v
 
 

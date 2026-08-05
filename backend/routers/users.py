@@ -125,6 +125,8 @@ async def change_my_password(
     """当前用户修改自己的密码"""
     if not verify_password(body.old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="原密码错误")
+    if body.old_password == body.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与原密码相同")
     current_user.password_hash = get_password_hash(body.new_password)
     current_user.must_change_password = False
     db.commit()

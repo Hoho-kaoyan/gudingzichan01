@@ -46,6 +46,7 @@ const Layout = () => {
   const [passwordModalVisible, setPasswordModalVisible] = useState(false)
   const [passwordForm] = Form.useForm()
   const [passwordSubmitting, setPasswordSubmitting] = useState(false)
+  const [isForcedPasswordChange, setIsForcedPasswordChange] = useState(false)
 
   const setCollapse = (value) => {
     setCollapsed(value)
@@ -61,6 +62,10 @@ const Layout = () => {
         message.error('两次输入的新密码不一致')
         return
       }
+      if (values.old_password === values.new_password) {
+        message.error('新密码不能与原密码相同')
+        return
+      }
       setPasswordSubmitting(true)
       await api.put('/users/me/password', {
         old_password: values.old_password,
@@ -68,6 +73,7 @@ const Layout = () => {
       })
       message.success('密码修改成功')
       setPasswordModalVisible(false)
+      setIsForcedPasswordChange(false)
       setRequirePasswordChange(false)
       passwordForm.resetFields()
     } catch (error) {
@@ -85,6 +91,7 @@ const Layout = () => {
   // 首次登录强制修改密码
   useEffect(() => {
     if (requirePasswordChange) {
+      setIsForcedPasswordChange(true)
       setPasswordModalVisible(true)
     }
   }, [requirePasswordChange])
@@ -179,6 +186,7 @@ const Layout = () => {
       label: '修改密码',
       onClick: () => {
         passwordForm.resetFields()
+        setIsForcedPasswordChange(false)
         setPasswordModalVisible(true)
       }
     },
@@ -241,7 +249,15 @@ const Layout = () => {
       <Modal
         title="首次登录必须修改密码"
         open={passwordModalVisible}
-        onCancel={() => { setPasswordModalVisible(false); passwordForm.resetFields(); logout() }}
+        onCancel={() => {
+          setPasswordModalVisible(false)
+          passwordForm.resetFields()
+          // 首次登录强制改密场景下未修改密码就取消，则退出登录
+          if (isForcedPasswordChange) {
+            logout()
+            navigate('/login')
+          }
+        }}
         onOk={handlePasswordSubmit}
         confirmLoading={passwordSubmitting}
         destroyOnClose
@@ -261,7 +277,7 @@ const Layout = () => {
               { pattern: /[A-Z]/, message: '密码必须包含大写字母' },
               { pattern: /[a-z]/, message: '密码必须包含小写字母' },
               { pattern: /[0-9]/, message: '密码必须包含数字' },
-              { pattern: /[@#$%^&]/, message: '密码必须包含特殊字符(@#$%^&)' }
+              { pattern: /[^\w]/, message: '密码必须包含特殊字符（非字母、数字、下划线的符号，如 @ # $ 等）' }
             ]}
           >
             <Input.Password placeholder="请输入新密码（8位以上，包含大小写字母、数字、特殊字符）" />

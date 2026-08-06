@@ -67,14 +67,13 @@ def get_user_by_ehr(db: Session, ehr_number: str) -> Optional[User]:
 
 
 def authenticate_user(db: Session, ehr_number: str, password: str) -> Optional[User]:
-    """验证用户身份"""
+    """验证用户身份
+    【v5.1 修复 Bug 4.1】放开"离职"/"待离职核验"用户的登录，允许其完成名下安全检查任务
+    """
     user = get_user_by_ehr(db, ehr_number)
     if not user:
         return None
     if not verify_password(password, user.password_hash):
-        return None
-    # 离职用户不允许登录
-    if user.status == "离职":
         return None
     return user
 

@@ -396,14 +396,50 @@ class SafetyCheckAssetTypeMapping(Base):
 class PendingReallocation(Base):
     """待生效的调拨：管理员改所有人后，等原所有人完成安全检查任务后才更新资产使用人"""
     __tablename__ = "pending_reallocations"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     asset_id = Column(Integer, ForeignKey("assets.id"), nullable=False, comment="资产ID")
     new_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, comment="新使用人ID")
     task_id = Column(Integer, ForeignKey("safety_check_tasks.id"), nullable=False, comment="关联的安全检查任务ID")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
-    
+
     # 关系
     asset = relationship("Asset")
     new_user = relationship("User", foreign_keys=[new_user_id])
     task = relationship("SafetyCheckTask")
+
+
+class Notification(Base):
+    """系统通知表（v5.1 新增）"""
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True, comment="接收人")
+    type = Column(String(50), nullable=False, comment="通知类型: transfer_approved/transfer_rejected/return_approved/return_rejected")
+    title = Column(String(200), nullable=False)
+    content = Column(Text, nullable=False)
+    related_request_type = Column(String(20), nullable=True, comment="transfer/return/edit")
+    related_request_id = Column(Integer, nullable=True)
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    read_at = Column(DateTime(timezone=True), nullable=True)
+
+    # 关系
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class UserStatusHistory(Base):
+    """用户状态变更审计日志（v5.1 新增）"""
+    __tablename__ = "user_status_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    old_status = Column(String(20), nullable=False)
+    new_status = Column(String(20), nullable=False)
+    changed_by_id = Column(Integer, ForeignKey("users.id"), nullable=True, comment="操作人ID,系统自动切换为 NULL")
+    reason = Column(Text, nullable=True, comment="撤销原因/备注")
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # 关系
+    user = relationship("User", foreign_keys=[user_id])
+    changed_by = relationship("User", foreign_keys=[changed_by_id])

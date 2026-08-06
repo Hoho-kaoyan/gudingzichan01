@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import User, Asset, SafetyCheckTask, TaskAsset
+from models import User, Asset, SafetyCheckTask, TaskAsset, UserStatusHistory
 from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange, ImportConflictDetail, ImportConflictDiff, ImportResolveRequest
 from auth import get_current_user, get_current_admin_user, get_password_hash, verify_password
 import pandas as pd
@@ -18,6 +18,44 @@ from safety_check_linkage import get_check_type_for_asset
 from logger import logger
 import random
 from schemas import ImportErrorDetail
+
+
+# 【v5.1 新增】状态值定义
+# 注意：当前 User.status 在数据库中是字符串字段而非 enum，此处集中定义便于全文一致引用
+USER_STATUS_VALUES = {"在岗", "待离职核验", "离职", "长期出差", "借调", "产假"}
+# 处于这两个状态的用户的写操作受限
+RESTRICTED_WRITE_STATUSES = {"待离职核验", "离职"}
+
+
+def assert_user_can_write(current_user: User, allow_password_change: bool = False) -> None:
+    """【v5.1 新增】拦截受限状态下用户的写操作
+
+    - 待离职核验 / 离职：仅允许登录查看、提交自己的安检任务、改自己的密码
+    - allow_password_change=True 时跳过检查（用于改密码等最小路径）
+    """
+    if current_user.status in RESTRICTED_WRITE_STATUSES and not allow_password_change:
+        raise HTTPException(
+            status_code=403,
+            detail=f"用户状态为「{current_user.status}」，仅可登录查看、提交自己的安检任务与修改密码"
+        )
+
+
+def write_status_audit(
+    db: Session,
+    user_id: int,
+    old_status: str,
+    new_status: str,
+    changed_by_id: Optional[int],
+    reason: Optional[str] = None,
+) -> None:
+    """【v5.1 新增】写入用户状态变更审计日志"""
+    db.add(UserStatusHistory(
+        user_id=user_id,
+        old_status=old_status,
+        new_status=new_status,
+        changed_by_id=changed_by_id,
+        reason=reason,
+    ))
 
 
 def _build_user_import_conflict_diffs(existing_user: User, new_data: dict) -> List[ImportConflictDiff]:

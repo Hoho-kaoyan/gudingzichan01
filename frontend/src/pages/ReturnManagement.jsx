@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Table, Button, Modal, Form, Input, Select, message, Space, Divider } from 'antd'
 import { PlusOutlined, SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { formatEast8 } from '../utils/datetime'
 import { useAuth } from '../contexts/AuthContext'
 import { parseSafetyCheckError } from '../utils/safetyCheckError'
 
@@ -203,7 +204,7 @@ const ReturnManagement = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
+      render: (text) => text ? formatEast8(text) : '-'
     }
   ]
 

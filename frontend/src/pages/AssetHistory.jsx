@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { Card, Timeline, Tag, Button, message, Spin, Descriptions } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { formatEast8 } from '../utils/datetime'
 
 const AssetHistory = () => {
   const { assetId } = useParams()
@@ -185,7 +186,7 @@ const AssetHistory = () => {
                         {getActionTypeText(item.action_type)}
                       </Tag>
                       <span style={{ marginLeft: 8, color: '#666' }}>
-                        {new Date(item.created_at).toLocaleString('zh-CN')}
+                        {formatEast8(item.created_at)}
                       </span>
                     </div>
                     {renderHistoryItem(item)}

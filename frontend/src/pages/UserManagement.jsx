@@ -12,6 +12,7 @@ const UserManagement = () => {
   const [editingUser, setEditingUser] = useState(null)
   const [form] = Form.useForm()
   const [filtersForm] = Form.useForm()
+  const [resignationForm] = Form.useForm()  // 【v5.1.1】标记离职表单
   const [filters, setFilters] = useState({})
   const [importErrorModalVisible, setImportErrorModalVisible] = useState(false)
   const [importErrors, setImportErrors] = useState([])
@@ -114,6 +115,32 @@ const UserManagement = () => {
       fetchGroups() // 刷新组别列表以包含新输入的组别
     } catch (error) {
       message.error(error.response?.data?.detail || '操作失败')
+    }
+  }
+
+  // 【v5.1.1】标记离职提交（接 resignationForm）
+  const handleResignationFormSubmit = async (values) => {
+    if (!resigningUser) return
+    setMarkingResignation(true)
+    try {
+      await api.post(`/users/${resigningUser.id}/start-resignation-check`, values)
+      if (userAssetCount > 0) {
+        message.success(
+          `已进入「待离职核验」,已为该用户创建 ${userAssetCount} 个核验任务。` +
+          (values.assignee_type === 'other' ? '任务已分配给接管人。' : '请通知该员工完成。')
+        )
+      } else {
+        message.success('已进入「待离职核验」状态')
+      }
+      setResignationModalVisible(false)
+      setResigningUser(null)
+      setUserAssetCount(0)
+      resignationForm.resetFields()
+      fetchUsers()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '标记离职失败')
+    } finally {
+      setMarkingResignation(false)
     }
   }
 
@@ -661,24 +688,25 @@ const UserManagement = () => {
         />
       </Modal>
 
-      {/* 标记离职确认Modal */}
+      {/* 标记离职确认Modal - v5.1.1 支持选 self/other */}
       <Modal
-        title="标记离职"
+        title="标记离职（v5.1 待离职核验流程）"
         open={resignationModalVisible}
         onCancel={() => {
           setResignationModalVisible(false)
           setResigningUser(null)
           setUserAssetCount(0)
+          resignationForm.resetFields()
         }}
-        onOk={handleConfirmMarkResignation}
+        onOk={() => resignationForm.submit()}
         confirmLoading={markingResignation}
-        okText="确认标记离职"
+        okText="发起离职核验"
         cancelText="取消"
-        width={500}
+        width={560}
       >
         <div style={{ marginBottom: 16 }}>
           <Alert
-            message="是否完成数据安全检查进行资产交接？"
+            message="离职流程：员工状态会先进入「待离职核验」,所有核验任务完成后由系统自动切到「离职」。"
             type="warning"
             showIcon
             style={{ marginBottom: 16 }}
@@ -689,19 +717,38 @@ const UserManagement = () => {
               <p><strong>名下资产数量：</strong>{userAssetCount}个</p>
             </div>
           )}
-          <div>
-            <p><strong>确认后将：</strong></p>
-            <ol style={{ marginLeft: 20, marginTop: 8 }}>
-              <li>将该用户状态更新为「离职」</li>
-              {userAssetCount > 0 && (
-                <>
-                  <li>为该用户{userAssetCount}个资产自动创建安全检查任务</li>
-                  <li>任务将分配给该用户</li>
-                </>
-              )}
-            </ol>
-          </div>
         </div>
+        <Form form={resignationForm} layout="vertical" onFinish={handleResignationFormSubmit} initialValues={{ assignee_type: 'self' }}>
+          <Form.Item label="核验任务归属" name="assignee_type" rules={[{ required: true }]}>
+            <Select onChange={(v) => v === 'other' && fetchUsers()}>
+              <Select.Option value="self">离职员工本人完成（默认）</Select.Option>
+              <Select.Option value="other">指定他人完成</Select.Option>
+            </Select>
+          </Form.Item>
+          <Form.Item
+            noStyle
+            shouldUpdate={(prev, cur) => prev.assignee_type !== cur.assignee_type}
+          >
+            {({ getFieldValue }) =>
+              getFieldValue('assignee_type') === 'other' ? (
+                <Form.Item
+                  label="接管人"
+                  name="assignee_id"
+                  rules={[{ required: true, message: '请选择接管人' }]}
+                >
+                  <Select
+                    showSearch
+                    placeholder="请输入接管人姓名或EHR号"
+                    optionFilterProp="label"
+                    options={users
+                      .filter(u => u.id !== resigningUser?.id && !['待离职核验', '离职'].includes(u.status))
+                      .map(u => ({ value: u.id, label: `${u.real_name} (EHR:${u.ehr_number}) - ${u.group || '未分组'}` }))}
+                  />
+                </Form.Item>
+              ) : null
+            }
+          </Form.Item>
+        </Form>
       </Modal>
 
       {/* 导入冲突：与数据库有差异，用户选择覆盖或保持 */}

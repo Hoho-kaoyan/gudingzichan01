@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
 import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge, Modal, Form, Input, message } from 'antd'
+import { Layout as AntLayout, Menu, Avatar, Dropdown, Space, Badge, Modal, Form, Input, message, Drawer, List, Empty, Button, Tag } from 'antd'
 import {
   DashboardOutlined,
   UserOutlined,
@@ -13,11 +13,13 @@ import {
   MenuUnfoldOutlined,
   FileTextOutlined,
   LockOutlined,
-  FileDoneOutlined
+  FileDoneOutlined,
+  BellOutlined
 } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
 import api from '../utils/api'
+import { formatEast8 } from '../utils/datetime'
 
 const { Header, Sider, Content } = AntLayout
 
@@ -47,6 +49,53 @@ const Layout = () => {
   const [passwordForm] = Form.useForm()
   const [passwordSubmitting, setPasswordSubmitting] = useState(false)
   const [isForcedPasswordChange, setIsForcedPasswordChange] = useState(false)
+
+  // 【v5.1.1】通知抽屉
+  const [notifDrawerOpen, setNotifDrawerOpen] = useState(false)
+  const [notifList, setNotifList] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+
+  const fetchUnreadCount = async () => {
+    try {
+      const r = await api.get('/notifications/unread-count')
+      setUnreadCount(r.data?.unread_count || 0)
+    } catch (e) { /* 静默 */ }
+  }
+
+  const fetchNotifications = async () => {
+    try {
+      const r = await api.get('/notifications', { params: { limit: 50 } })
+      setNotifList(r.data || [])
+    } catch (e) { /* 静默 */ }
+  }
+
+  const openNotifDrawer = async () => {
+    setNotifDrawerOpen(true)
+    await fetchNotifications()
+  }
+
+  const markAllRead = async () => {
+    try {
+      await api.put('/notifications/read-all')
+      setUnreadCount(0)
+      setNotifList(prev => prev.map(n => ({ ...n, is_read: true, read_at: new Date().toISOString() })))
+    } catch (e) { /* 静默 */ }
+  }
+
+  const markOneRead = async (id) => {
+    try {
+      await api.put(`/notifications/${id}/read`)
+      setNotifList(prev => prev.map(n => n.id === id ? { ...n, is_read: true } : n))
+      setUnreadCount(c => Math.max(0, c - 1))
+    } catch (e) { /* 静默 */ }
+  }
+
+  useEffect(() => {
+    fetchUnreadCount()
+    // 每 60s 拉一次
+    const interval = setInterval(fetchUnreadCount, 60000)
+    return () => clearInterval(interval)
+  }, [])
 
   const setCollapse = (value) => {
     setCollapsed(value)
@@ -235,6 +284,13 @@ const Layout = () => {
       <AntLayout style={{ height: '100vh', overflow: 'hidden' }}>
         <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', justifyContent: 'flex-end', alignItems: 'center', flexShrink: 0 }}>
           <Space>
+            <Badge count={unreadCount} size="small" offset={[-2, 2]}>
+              <Button
+                type="text"
+                icon={<BellOutlined style={{ fontSize: 18 }} />}
+                onClick={openNotifDrawer}
+              />
+            </Badge>
             <span>欢迎，{user?.real_name}</span>
             <Dropdown menu={{ items: userMenuItems }} placement="bottomRight">
               <Avatar style={{ cursor: 'pointer' }} icon={<UserOutlined />} />
@@ -287,6 +343,43 @@ const Layout = () => {
           </Form.Item>
         </Form>
       </Modal>
+
+      {/* 【v5.1.1】通知抽屉 */}
+      <Drawer
+        title="系统通知"
+        placement="right"
+        width={400}
+        open={notifDrawerOpen}
+        onClose={() => setNotifDrawerOpen(false)}
+        extra={
+          <Button size="small" onClick={markAllRead} disabled={unreadCount === 0}>
+            全部标为已读
+          </Button>
+        }
+      >
+        {notifList.length === 0 ? (
+          <Empty description="暂无通知" />
+        ) : (
+          <List
+            dataSource={notifList}
+            renderItem={(item) => (
+              <List.Item
+                style={{ cursor: 'pointer', background: item.is_read ? '#fff' : '#f0f5ff', padding: 12, marginBottom: 8, borderRadius: 4 }}
+                onClick={() => !item.is_read && markOneRead(item.id)}
+              >
+                <div style={{ width: '100%' }}>
+                  <Space style={{ marginBottom: 4 }}>
+                    <Tag color={item.type.startsWith('transfer') ? 'blue' : 'orange'}>{item.type}</Tag>
+                    <strong>{item.title}</strong>
+                  </Space>
+                  <div style={{ color: '#666', fontSize: 13, marginBottom: 4 }}>{item.content}</div>
+                  <div style={{ color: '#999', fontSize: 11 }}>{formatEast8(item.created_at)}</div>
+                </div>
+              </List.Item>
+            )}
+          />
+        )}
+      </Drawer>
     </AntLayout>
   )
 }

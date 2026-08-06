@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Table, Button, Modal, Form, Input, Select, message, Space, Popconfirm, Row, Col, Tag, AutoComplete, Typography } from 'antd'
 import { PlusOutlined, CloseCircleOutlined, SearchOutlined, ReloadOutlined, CheckCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { formatEast8 } from '../utils/datetime'
 import { useAuth } from '../contexts/AuthContext'
 import { useTransfer } from '../contexts/TransferContext'
 import { parseSafetyCheckError } from '../utils/safetyCheckError'
@@ -293,7 +294,7 @@ const TransferManagement = () => {
               {record.to_user_confirm_comment && renderCommentContent()}
               {record.to_user_confirmed_at && (
                 <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
-                  {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
+                  {formatEast8(record.to_user_confirmed_at)}
                 </div>
               )}
             </div>
@@ -307,7 +308,7 @@ const TransferManagement = () => {
               {record.to_user_confirm_comment && renderCommentContent()}
               {record.to_user_confirmed_at && (
                 <div style={{ color: '#999', fontSize: '11px', marginTop: 2 }}>
-                  {new Date(record.to_user_confirmed_at).toLocaleString('zh-CN')}
+                  {formatEast8(record.to_user_confirmed_at)}
                 </div>
               )}
             </div>
@@ -329,7 +330,7 @@ const TransferManagement = () => {
       dataIndex: 'created_at',
       key: 'created_at',
       width: 120,
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
+      render: (text) => text ? formatEast8(text) : '-'
     },
     {
       title: '操作',

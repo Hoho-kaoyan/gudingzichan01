@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Table, Tabs, Button, Modal, Form, Input, message, Tag, Space, Descriptions, Divider } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
+import { formatEast8 } from '../utils/datetime'
 import { useTransfer } from '../contexts/TransferContext'
 import { parseSafetyCheckError } from '../utils/safetyCheckError'
 
@@ -25,6 +26,53 @@ const ApprovalManagement = () => {
   const [currentRequest, setCurrentRequest] = useState(null)
   const [approvalDecision, setApprovalDecision] = useState(true)
   const [form] = Form.useForm()
+
+  // 【v5.1.1】批量审批 - 退回申请多选
+  const [selectedReturnIds, setSelectedReturnIds] = useState([])
+  const [batchApproving, setBatchApproving] = useState(false)
+
+  const handleBatchApproveReturns = async () => {
+    if (selectedReturnIds.length === 0) {
+      message.warning('请先勾选要通过的退回申请')
+      return
+    }
+    Modal.confirm({
+      title: `确认批量通过 ${selectedReturnIds.length} 条退回申请?`,
+      content: '逐条调用 /api/approvals/approve,失败的单条会单独提示。',
+      okText: '确认批量通过',
+      cancelText: '取消',
+      onOk: async () => {
+        setBatchApproving(true)
+        let successCount = 0
+        const failed = []
+        for (const id of selectedReturnIds) {
+          try {
+            await api.post('/approvals/approve', {
+              request_id: id,
+              request_type: 'return',
+              approved: true,
+              comment: '批量审批通过'
+            })
+            successCount++
+          } catch (e) {
+            failed.push({ id, msg: e.response?.data?.detail || '失败' })
+          }
+        }
+        setBatchApproving(false)
+        setSelectedReturnIds([])
+        message.success(`批量审批完成:成功 ${successCount} / 失败 ${failed.length}`)
+        if (failed.length > 0) {
+          Modal.error({
+            title: `以下 ${failed.length} 条审批失败`,
+            content: failed.map(f => `#${f.id}: ${f.msg}`).join('\n')
+          })
+        }
+        fetchReturns()
+        fetchTransfers()
+        fetchEdits()
+      }
+    })
+  }
 
   useEffect(() => {
     fetchTransfers()
@@ -188,7 +236,7 @@ const ApprovalManagement = () => {
       title: '申请时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
+      render: (text) => text ? formatEast8(text) : '-'
     },
     {
       title: '操作',
@@ -213,9 +261,9 @@ const ApprovalManagement = () => {
     { title: '转出人', dataIndex: ['from_user', 'real_name'], key: 'from_user' },
     { title: '转入人', dataIndex: ['to_user', 'real_name'], key: 'to_user' },
     { title: '交接原因', dataIndex: 'reason', key: 'reason' },
-    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
-    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
     { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
   ]
@@ -245,7 +293,7 @@ const ApprovalManagement = () => {
       title: '申请时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
+      render: (text) => text ? formatEast8(text) : '-'
     },
     {
       title: '操作',
@@ -269,9 +317,9 @@ const ApprovalManagement = () => {
     { title: '资产名称', dataIndex: ['asset', 'name'], key: 'asset_name' },
     { title: '退回人', dataIndex: ['user', 'real_name'], key: 'user' },
     { title: '退回原因', dataIndex: 'reason', key: 'reason' },
-    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
-    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
     { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
   ]
@@ -342,7 +390,7 @@ const ApprovalManagement = () => {
       title: '申请时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (text) => text ? new Date(text).toLocaleString('zh-CN') : '-'
+      render: (text) => text ? formatEast8(text) : '-'
     },
     {
       title: '操作',
@@ -374,9 +422,9 @@ const ApprovalManagement = () => {
         return Object.keys(record.edit_data).map(key => labelMap[key] || key).join('、')
       }
     },
-    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '申请时间', dataIndex: 'created_at', key: 'created_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批结果', dataIndex: 'status', key: 'status', render: (s) => s === 'approved' ? <Tag color="success">通过</Tag> : <Tag color="error">拒绝</Tag> },
-    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
+    { title: '审批时间', dataIndex: 'approved_at', key: 'approved_at', render: (t) => t ? formatEast8(t) : '-' },
     { title: '审批人', dataIndex: ['approver', 'real_name'], key: 'approver' },
     { title: '审批意见', dataIndex: 'approval_comment', key: 'approval_comment', ellipsis: true }
   ]
@@ -398,12 +446,32 @@ const ApprovalManagement = () => {
       key: 'returns',
       label: `退回申请 (${returns.length})`,
       children: (
-        <Table
-          columns={returnColumns}
-          dataSource={returns}
-          loading={loading}
-          rowKey="id"
-        />
+        <div>
+          <div style={{ marginBottom: 12, display: 'flex', gap: 8 }}>
+            <Button
+              type="primary"
+              loading={batchApproving}
+              disabled={selectedReturnIds.length === 0}
+              onClick={handleBatchApproveReturns}
+            >
+              批量通过 ({selectedReturnIds.length})
+            </Button>
+            <Button onClick={() => setSelectedReturnIds([])} disabled={selectedReturnIds.length === 0}>
+              清空选择
+            </Button>
+          </div>
+          <Table
+            columns={returnColumns}
+            dataSource={returns}
+            loading={loading}
+            rowKey="id"
+            rowSelection={{
+              selectedRowKeys: selectedReturnIds,
+              onChange: (keys) => setSelectedReturnIds(keys),
+              getCheckboxProps: (record) => ({ disabled: record.status !== 'pending' })
+            }}
+          />
+        </div>
       )
     },
     {

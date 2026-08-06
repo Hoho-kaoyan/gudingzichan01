@@ -330,16 +330,20 @@ async def create_user(
     ).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="EHR号已存在")
-    
-    # 创建新用户
-    hashed_password = get_password_hash(user_data.password)
+
+    # 【v5.1.1】密码留空时使用默认密码 "Aa@1234567"（与批量导入一致）
+    DEFAULT_PASSWORD = "Aa@1234567"
+    raw_password = user_data.password if user_data.password else DEFAULT_PASSWORD
+    # 同时设置 must_change_password=True，强制首次登录后修改
+    hashed_password = get_password_hash(raw_password)
     db_user = User(
         ehr_number=user_data.ehr_number,
         real_name=user_data.real_name,
         group=user_data.group,
         role=user_data.role,
         status=user_data.status if hasattr(user_data, 'status') and user_data.status else "在岗",
-        password_hash=hashed_password
+        password_hash=hashed_password,
+        must_change_password=True,  # 使用默认密码时强制首次登录修改
     )
     db.add(db_user)
     db.commit()
@@ -552,6 +556,7 @@ async def update_user(
     
     # 记录旧状态
     old_status = user.status
+    old_group = user.group
 
     # 更新字段
     if user_data.real_name is not None:
@@ -578,6 +583,22 @@ async def update_user(
 
     if old_status != user.status:
         write_status_audit(db, user.id, old_status, user.status, current_user.id, "管理员修改")
+
+    # 【v5.1.1 Bug 3.1 修复】组别变更时同步更新该用户作为使用人/执行人的资产 user_group
+    if user_data.group is not None and user_data.group != old_group:
+        new_group = user_data.group if user_data.group != "" else None
+        # 同步 1:该用户作为使用人的资产
+        cnt1 = db.query(Asset).filter(
+            Asset.user_id == user_id, Asset.deleted_at.is_(None)
+        ).update({Asset.user_group: new_group}, synchronize_session=False)
+        # 同步 2:该用户作为"安全检查执行人"的资产
+        cnt2 = db.query(Asset).filter(
+            Asset.safety_check_executor_id == user_id, Asset.deleted_at.is_(None)
+        ).update({Asset.user_group: new_group}, synchronize_session=False)
+        logger.info(
+            f"组别同步: 用户 {user.ehr_number}({user.real_name}) 组别「{old_group}」→「{user_data.group}」,"
+            f"同步 {cnt1} 件使用资产 + {cnt2} 件执行资产的 user_group"
+        )
 
     db.commit()
     db.refresh(user)

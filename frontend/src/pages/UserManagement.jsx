@@ -494,14 +494,13 @@ const UserManagement = () => {
           </Form.Item>
           {!editingUser && (
             <Form.Item
-              label="密码"
+              label="密码（留空则使用默认密码 Aa@1234567，用户首次登录需修改）"
               name="password"
               rules={[
-                { required: true, message: '请输入密码' },
                 { min: 8, message: '密码至少 8 位' },
                 {
                   validator: (_, value) => {
-                    if (!value) return Promise.resolve()
+                    if (!value) return Promise.resolve()  // 留空：使用默认密码
                     const checks = []
                     if (!/[A-Z]/.test(value)) checks.push('大写字母')
                     if (!/[a-z]/.test(value)) checks.push('小写字母')
@@ -515,7 +514,7 @@ const UserManagement = () => {
               ]}
               hasFeedback
             >
-              <Input.Password placeholder="至少 8 位,含大小写字母、数字、特殊字符" />
+              <Input.Password placeholder="留空则使用默认密码 Aa@1234567" />
             </Form.Item>
           )}
           {editingUser && (

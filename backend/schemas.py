@@ -40,11 +40,14 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=8, description="密码")
+    # 【v5.1.1 新增需求】密码非必填，留空时后端使用默认密码 "Aa@1234567"
+    password: Optional[str] = Field(None, description="密码（留空时使用默认密码）")
 
     @field_validator('password')
     @classmethod
     def validate_password_strength(cls, v):
+        if v is None or v == "":
+            return None  # 留空：不校验，后端用默认
         if len(v) < 8:
             raise ValueError('密码至少8位')
         if not re.search(r'[A-Z]', v):

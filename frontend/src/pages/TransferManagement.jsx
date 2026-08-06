@@ -482,9 +482,13 @@ const TransferManagement = () => {
               options={userOptions
                 .filter(option => {
                   const isNotSelf = option.value !== currentUser?.id
+                  // 【缺陷 7 修复 v5.1】过滤掉"待离职核验"/"离职"员工
+                  const user = users.find(u => u.id === option.value)
+                  if (user && user.status && ['待离职核验', '离职'].includes(user.status)) {
+                    return false
+                  }
                   // 组长交接自己名下资产时可选所有人（含管理员）；交接组内他人资产时仅本组
                   if (isLeader && !isLeaderTransferringOwnAsset) {
-                    const user = users.find(u => u.id === option.value)
                     return isNotSelf && user?.group === currentUser?.group
                   }
                   return isNotSelf

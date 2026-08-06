@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import ReturnRequest, Asset, User, UserRole
+from models import ReturnRequest, Asset, User, UserRole, TransferRequest
 from schemas import ReturnRequestCreate, ReturnRequestResponse
 from auth import get_current_user
 from logger import logger
@@ -132,7 +132,22 @@ async def create_return_request(
     # 检查资产是否在使用中
     if asset.status != "在用":
         raise HTTPException(status_code=400, detail="只能退回在用状态的资产")
-    
+
+    # 【Bug 1.2 修复 v5.1】互斥检查：同一资产已有待处理的交接/退回申请则拒绝
+    pending_transfer = db.query(TransferRequest).filter(
+        TransferRequest.asset_id == return_data.asset_id,
+        TransferRequest.status.in_(["waiting_confirmation", "pending"])
+    ).first()
+    if pending_transfer:
+        raise HTTPException(status_code=400, detail="该资产已有待处理的交接申请,请先处理")
+
+    pending_return = db.query(ReturnRequest).filter(
+        ReturnRequest.asset_id == return_data.asset_id,
+        ReturnRequest.status == "pending"
+    ).first()
+    if pending_return:
+        raise HTTPException(status_code=400, detail="该资产已有待处理的退回申请,请先处理")
+
     # 检查权限：
     # 1. 管理员：全量
     # 2. 组长：只能退回本组资产

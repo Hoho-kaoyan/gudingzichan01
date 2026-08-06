@@ -213,6 +213,14 @@ async def create_transfer_request(
     to_user = db.query(User).filter(User.id == transfer_data.to_user_id).first()
     if not to_user:
         raise HTTPException(status_code=404, detail="转入用户不存在")
+
+    # 【缺陷 7 修复 v5.1】禁止将资产交接给"待离职核验"或"离职"状态的员工
+    # 这些员工即将/已经离开,接收资产没有业务意义,且可能登录不了系统处理后续安检
+    if to_user.status in ("待离职核验", "离职"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"转入用户「{to_user.real_name}」状态为「{to_user.status}」,无法接收资产"
+        )
     
     # 确定转出用户（资产的使用人或当前用户）
     from_user_id = asset.user_id or current_user.id
@@ -394,6 +402,14 @@ async def confirm_transfer_request(
         request.status = "confirmation_rejected"
         action_description = f"转入人拒绝资产交接申请"
         logger.info(f"用户 {current_user.ehr_number}({current_user.real_name}) 拒绝资产交接申请: 申请ID {request.id}")
+
+        # 【缺陷 3 修复 v5.1】转入人拒绝时取消联动安检任务
+        linked_task_id = getattr(request, "linked_safety_task_id", None)
+        if linked_task_id:
+            linked_task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == linked_task_id).first()
+            if linked_task and linked_task.status in ("pending", "overdue"):
+                linked_task.status = "cancelled"
+                logger.info(f"转入人拒绝交接：联动安检任务 #{linked_task_id} 已取消")
     
     # 记录确认历史
     try:

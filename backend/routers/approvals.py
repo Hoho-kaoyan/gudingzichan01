@@ -91,17 +91,18 @@ async def approve_request(
 
                 # 获取转出用户信息
                 from_user = db.query(User).filter(User.id == request.from_user_id).first()
-                
-                # 更新该资产未完成的安全检查任务到新接收人
-                pending_task_assets = db.query(TaskAsset).filter(
-                    TaskAsset.asset_id == asset.id,
-                    TaskAsset.status == "pending"
-                ).all()
-                
-                for task_asset in pending_task_assets:
-                    task_asset.assigned_user_id = request.to_user_id
-                    logger.info(f"资产交接：安全检查任务资产关联ID {task_asset.id} 已更新到新接收人 {to_user.real_name if to_user else ''}")
-                
+
+                # 【Bug 1.4 修复 v5.1】不切换 task_assets.assigned_user_id
+                # 原逻辑会把 pending 任务的归属从 from_user 切到 to_user，
+                # 导致转入人莫名其妙收到不属于他的安检任务。
+                # v5.1 决策：交接流程的联动安检任务保持原使用人（转出人），
+                # 后续年度/入库/调拨等任务按新使用人/安全检查执行人重新生成。
+                logger.info(
+                    f"资产交接：安检任务保持归属原使用人 "
+                    f"from={request.from_user_id} to={request.to_user_id}, "
+                    f"asset_id={asset.id}, 不切换 task_assets.assigned_user_id(按 v5.1 需求)"
+                )
+
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}, 申请ID {request.id}")
                 
                 # 记录审批通过历史
@@ -129,9 +130,17 @@ async def approve_request(
             # 记录审批拒绝历史
             # operator_id 应该是实际发起申请的用户
             operator_id = request.created_by_id if request.created_by_id else request.from_user_id
-            
+
             logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 拒绝资产交接申请: 资产ID {request.asset_id}, 申请ID {request.id}")
-            
+
+            # 【缺陷 4 修复 v5.1】审批拒绝时取消联动安检任务（避免幽灵任务）
+            linked_task_id = getattr(request, "linked_safety_task_id", None)
+            if linked_task_id:
+                linked_task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == linked_task_id).first()
+                if linked_task and linked_task.status in ("pending", "overdue"):
+                    linked_task.status = "cancelled"
+                    logger.info(f"审批拒绝交接：联动安检任务 #{linked_task_id} 已取消")
+
             try:
                 create_history = get_create_history_record()
                 create_history(

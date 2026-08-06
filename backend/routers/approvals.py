@@ -47,6 +47,18 @@ async def approve_request(
 
         # 【干预点3：如果管理员点的是通过（approved），审批前必须确保原所有人做完了安检】
         if approval_data.approved:
+            # 【Bug 1.1 修复 v5.1】审批前重校验：资产必须存在、未删除、状态为"在用"、持有人未变
+            asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+            if not asset or asset.deleted_at is not None:
+                raise HTTPException(status_code=400, detail="资产已被删除,无法审批")
+            if asset.status != "在用":
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"资产当前状态为「{asset.status}」,无法完成交接审批(应先处理其它进行中流程)"
+                )
+            if asset.user_id != request.from_user_id:
+                raise HTTPException(status_code=400, detail="资产持有人已变更,请刷新后重试")
+
             check_unfinished_tasks_for_asset_user(db, request.asset_id, request.from_user_id)
         
         # 更新申请状态
@@ -68,13 +80,15 @@ async def approve_request(
                 old_user = db.query(User).filter(User.id == old_user_id).first() if old_user_id else None
                 
                 asset.user_id = request.to_user_id
+                # 【Bug 1.1 修复 v5.1】同步写 status="在用"，避免被退回流程覆盖
+                asset.status = "在用"
                 # 更新使用人组别
                 if to_user:
                     asset.user_group = to_user.group
                     # 同步更新执行人：默认与新使用人保持一致
                     asset.safety_check_executor_id = to_user.id
                     asset.safety_check_executor_name = to_user.real_name
-                
+
                 # 获取转出用户信息
                 from_user = db.query(User).filter(User.id == request.from_user_id).first()
                 

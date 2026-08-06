@@ -3,10 +3,10 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import or_
+from sqlalchemy import or_, and_
 from typing import List, Optional
 from database import get_db
-from models import TransferRequest, Asset, User, SafetyCheckTask
+from models import TransferRequest, Asset, User, ReturnRequest, SafetyCheckTask
 from schemas import TransferRequestCreate, TransferRequestResponse, TransferConfirmationRequest
 from auth import get_current_user
 from logger import logger
@@ -193,7 +193,22 @@ async def create_transfer_request(
     # 检查资产是否在使用中
     if asset.status != "在用":
         raise HTTPException(status_code=400, detail="只能交接在用状态的资产")
-    
+
+    # 【Bug 1.2 修复 v5.1】互斥检查：同一资产已有待处理的交接/退回申请则拒绝
+    pending_transfer = db.query(TransferRequest).filter(
+        TransferRequest.asset_id == transfer_data.asset_id,
+        TransferRequest.status.in_(["waiting_confirmation", "pending"])
+    ).first()
+    if pending_transfer:
+        raise HTTPException(status_code=400, detail="该资产已有待处理的交接申请,请先处理")
+
+    pending_return = db.query(ReturnRequest).filter(
+        ReturnRequest.asset_id == transfer_data.asset_id,
+        ReturnRequest.status == "pending"
+    ).first()
+    if pending_return:
+        raise HTTPException(status_code=400, detail="该资产已有待处理的退回申请,请先处理")
+
     # 检查转入用户是否存在
     to_user = db.query(User).filter(User.id == transfer_data.to_user_id).first()
     if not to_user:

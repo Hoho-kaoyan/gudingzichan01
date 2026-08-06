@@ -65,6 +65,26 @@ class UserUpdate(BaseModel):
     status: Optional[str] = None
     password: Optional[str] = None
 
+    @field_validator('password')
+    @classmethod
+    def validate_password_strength(cls, v):
+        """复用 UserCreate 的复杂度校验（修复 v5.1 缺陷 5）
+        仅在 password 字段被显式提供时校验；None 或空字符串视为「不修改」，跳过。
+        """
+        if v is None or v == "":
+            return v
+        if len(v) < 8:
+            raise ValueError('密码至少8位')
+        if not re.search(r'[A-Z]', v):
+            raise ValueError('密码必须包含大写字母')
+        if not re.search(r'[a-z]', v):
+            raise ValueError('密码必须包含小写字母')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('密码必须包含数字')
+        if not re.search(r'[^\w]', v):
+            raise ValueError('密码必须包含特殊字符（非字母、数字、下划线的符号，如 @ # $ 等）')
+        return v
+
 
 class PasswordChange(BaseModel):
     """当前用户修改自己的密码"""

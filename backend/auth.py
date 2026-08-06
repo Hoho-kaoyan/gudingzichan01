@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from models import User, UserRole
 import os
+from utils_time import now_utc_naive
 
 # JWT配置
 SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-change-in-production")
@@ -43,12 +44,15 @@ def get_password_hash(password: str) -> str:
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
-    """创建JWT访问令牌"""
+    """创建JWT访问令牌
+    使用 now_utc_naive() 生成 UTC naive 时间，与项目其他部分保持一致（修复 v5.1 缺陷 1）。
+    """
     to_encode = data.copy()
+    base = now_utc_naive()
     if expires_delta:
-        expire = datetime.utcnow() + expires_delta
+        expire = base + expires_delta
     else:
-        expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+        expire = base + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt

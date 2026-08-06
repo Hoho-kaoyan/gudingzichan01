@@ -71,13 +71,16 @@ const UserManagement = () => {
   const handleAdd = () => {
     setEditingUser(null)
     form.resetFields()
-    form.setFieldsValue({ status: '在岗' })
+    // 【修复 Bug 2.1】Antd mode="tags" 的 Select 调 resetFields 不会清掉已输入的 tag，
+    // 必须显式 setFieldsValue 置 undefined 才能避免下拉项残留
+    form.setFieldsValue({ group: undefined, status: '在岗' })
     setModalVisible(true)
   }
 
   const handleEdit = (record) => {
     setEditingUser(record)
-    form.setFieldsValue(record)
+    // 同样防御:group 为空字符串时显式置 undefined
+    form.setFieldsValue({ ...record, group: record.group || undefined })
     setModalVisible(true)
   }
 

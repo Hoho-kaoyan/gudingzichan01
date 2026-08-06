@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
-from models import ReturnRequest, Asset, User
+from models import ReturnRequest, Asset, User, UserRole
 from schemas import ReturnRequestCreate, ReturnRequestResponse
 from auth import get_current_user
 from logger import logger
@@ -238,3 +238,54 @@ async def create_return_request(
         joinedload(ReturnRequest.approver)
     ).filter(ReturnRequest.id == db_request.id).first()
     return ReturnRequestResponse.model_validate(db_request)
+
+
+@router.delete("/{request_id}")
+async def cancel_return_request(
+    request_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """撤回退回申请（仅申请人或管理员可撤回；修复 v5.1 Bug 1.5）
+
+    仅 pending 状态的申请可撤回；已审批的不可撤回。
+    """
+    request = db.query(ReturnRequest).filter(ReturnRequest.id == request_id).first()
+    if not request:
+        raise HTTPException(status_code=404, detail="退回申请不存在")
+
+    if request.status != "pending":
+        raise HTTPException(status_code=400, detail="只能撤回待审批的退回申请")
+
+    can_cancel = (
+        current_user.role == UserRole.ADMIN.value
+        or request.user_id == current_user.id
+    )
+    if not can_cancel:
+        raise HTTPException(status_code=403, detail="只有申请人或管理员可以撤回")
+
+    asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
+    logger.info(
+        f"用户 {current_user.ehr_number}({current_user.real_name}) 撤回资产退回申请: "
+        f"资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}"
+    )
+
+    request.status = "cancelled"
+
+    # 记录撤回历史
+    try:
+        create_history = get_create_history_record()
+        create_history(
+            db=db,
+            asset_id=request.asset_id,
+            action_type="return",
+            action_description="撤回资产退回申请",
+            operator_id=current_user.id,
+            related_request_id=request.id,
+            related_request_type="return"
+        )
+    except Exception as e:
+        logger.error(f"记录退回撤回历史失败: {e}", exc_info=True)
+
+    db.commit()
+    return {"message": "退回申请已撤回"}

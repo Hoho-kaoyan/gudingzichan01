@@ -11,6 +11,7 @@ from schemas import TransferRequestCreate, TransferRequestResponse, TransferConf
 from auth import get_current_user
 from logger import logger
 from utils_time import now_east8, now_utc_naive
+from routers.users import assert_user_can_write  # v5.1 Bug 4.6
 # 延迟导入避免循环依赖
 def get_create_history_record():
     from routers import asset_history
@@ -190,6 +191,9 @@ async def create_transfer_request(
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
     
+    # 【v5.1 Bug 4.6】待离职核验/离职用户不可发起交接
+    assert_user_can_write(current_user)
+
     # 检查资产是否在使用中
     if asset.status != "在用":
         raise HTTPException(status_code=400, detail="只能交接在用状态的资产")

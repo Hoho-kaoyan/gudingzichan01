@@ -25,6 +25,7 @@ def get_create_history_record():
 from datetime import datetime, date
 from utils_time import now_east8, now_utc_naive
 from safety_check_linkage import create_system_allocated_task
+from routers.users import assert_user_can_write  # v5.1 Bug 4.6
 
 router = APIRouter()
 
@@ -550,7 +551,15 @@ async def update_asset(
     asset = db.query(Asset).filter(Asset.id == asset_id, Asset.deleted_at.is_(None)).first()
     if not asset:
         raise HTTPException(status_code=404, detail="资产不存在")
-    
+
+    # 【v5.1 Bug 4.6】待离职核验/离职用户不可编辑资产
+    if current_user.role == "user":
+        assert_user_can_write(current_user)
+
+    # 【Bug 1.3 修复 v5.1】普通用户只能编辑"在用"状态的资产
+    if current_user.role == "user" and asset.status != "在用":
+        raise HTTPException(status_code=403, detail=f"资产当前状态为「{asset.status}」,无法编辑")
+
     # 普通用户只能编辑自己名下的资产
     if current_user.role == "user" and asset.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="只能编辑自己名下的资产")

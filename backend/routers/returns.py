@@ -9,6 +9,7 @@ from database import get_db
 from models import ReturnRequest, Asset, User, UserRole, TransferRequest
 from schemas import ReturnRequestCreate, ReturnRequestResponse
 from auth import get_current_user
+from routers.users import assert_user_can_write  # v5.1 Bug 4.6
 from logger import logger
 # 延迟导入避免循环依赖
 def get_create_history_record():
@@ -126,6 +127,9 @@ async def create_return_request(
     - 整批共用一组可修改字段（mac_address / ip_address / ...）
     - 任一资产不满足条件则整批拒绝
     """
+    # 【v5.1 Bug 4.6】待离职核验/离职用户不可发起退库
+    assert_user_can_write(current_user)
+
     asset_ids = return_data.asset_ids
     if not asset_ids:
         raise HTTPException(status_code=400, detail="至少选择一件资产")

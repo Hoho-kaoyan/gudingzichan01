@@ -86,6 +86,17 @@ class UserUpdate(BaseModel):
         return v
 
 
+class StartResignationCheckRequest(BaseModel):
+    """v5.1 发起离职核验请求"""
+    assignee_type: Literal["self", "other"] = Field(..., description="self=离职员工本人,other=指定他人")
+    assignee_id: Optional[int] = Field(None, description="指定他人时的接管人ID")
+
+
+class CancelResignationCheckRequest(BaseModel):
+    """v5.1 撤销离职核验请求"""
+    reason: str = Field(..., min_length=1, description="撤销原因（必填）")
+
+
 class PasswordChange(BaseModel):
     """当前用户修改自己的密码"""
     old_password: str = Field(..., description="原密码")

@@ -17,6 +17,7 @@ from schemas import (
 from auth import get_current_user
 from logger import logger
 from routers.safety_check_tasks import ensure_overdue_status_updated
+from routers.users import try_finalize_resignation  # v5.1 Bug 4.3
 import json
 
 router = APIRouter()
@@ -314,7 +315,12 @@ async def submit_check_result(
                     db.add(history_record)
     
     db.commit()
-    
+
+    # 【v5.1 Bug 4.3】提交后检查被指派用户是否所有离职核验任务都已完成
+    # 若完成则把状态从"待离职核验"自动切到"离职"
+    if task.source == "resignation":
+        try_finalize_resignation(db, task_asset.assigned_user_id)
+
     return {"message": "检查结果提交成功"}
 
 

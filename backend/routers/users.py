@@ -8,7 +8,7 @@ from sqlalchemy import or_
 from typing import List, Optional
 from database import get_db
 from models import User, Asset, SafetyCheckTask, TaskAsset, UserStatusHistory
-from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange, ImportConflictDetail, ImportConflictDiff, ImportResolveRequest
+from schemas import UserCreate, UserUpdate, UserResponse, ImportResponse, PasswordChange, ImportConflictDetail, ImportConflictDiff, ImportResolveRequest, StartResignationCheckRequest, CancelResignationCheckRequest
 from auth import get_current_user, get_current_admin_user, get_password_hash, verify_password
 import pandas as pd
 import io
@@ -56,6 +56,38 @@ def write_status_audit(
         changed_by_id=changed_by_id,
         reason=reason,
     ))
+
+
+def try_finalize_resignation(db: Session, user_id: int) -> bool:
+    """【v5.1 Bug 4.3 新增】检查用户的所有 resignation 安检任务是否完成。
+    若是，把状态从「待离职核验」自动切到「离职」，写 audit log。
+
+    - 提交检查结果后调用（safety_check_results.submit_check_result）
+    - 改派任务后调用（safety_check_tasks.reassign_task）
+    - 返回是否发生状态切换
+
+    注意：本函数会自行 commit，调用方不需要再 commit。
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or user.status != "待离职核验":
+        return False
+
+    unfinished = db.query(TaskAsset).join(SafetyCheckTask, SafetyCheckTask.id == TaskAsset.task_id).filter(
+        SafetyCheckTask.source == "resignation",
+        TaskAsset.status.in_(["pending", "overdue"]),
+    ).count()
+
+    if unfinished == 0:
+        old_status = user.status
+        user.status = "离职"
+        write_status_audit(db, user.id, old_status, "离职", None, "所有核验任务已完成,自动切换")
+        db.commit()
+        logger.info(
+            f"用户 {user.ehr_number}({user.real_name}) 所有离职核验任务已完成,"
+            f"状态自动从「{old_status}」切到「离职」"
+        )
+        return True
+    return False
 
 
 def _build_user_import_conflict_diffs(existing_user: User, new_data: dict) -> List[ImportConflictDiff]:
@@ -160,7 +192,11 @@ async def change_my_password(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """当前用户修改自己的密码"""
+    """当前用户修改自己的密码
+
+    【v5.1】特例路径：即使是「待离职核验/离职」状态也允许（v5.1 决策第 2.2 项）。
+    修改密码是最小化的个人维护路径，不涉及资产/任务/审批。
+    """
     if not verify_password(body.old_password, current_user.password_hash):
         raise HTTPException(status_code=400, detail="原密码错误")
     if body.old_password == body.new_password:
@@ -271,39 +307,189 @@ async def mark_user_resignation(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_admin_user)
 ):
-    """标记用户离职，并根据资产配置自动触发安全检查任务（仅管理员）"""
+    """【v5.1 改造】兼容旧接口：标记用户离职，进入「待离职核验」过渡态。
+
+    旧版本会直接创建任务并切到"离职"，但这样离职员工无法登录完成检查（死循环）。
+    新版本：默认 assignee_type=self，由离职员工本人完成核验，状态切到「待离职核验」，
+    所有核验任务完成后由系统自动切到「离职」。
+    前端推荐改用 POST /start-resignation-check 以支持指定他人接管。
+    """
+    return await _start_resignation_check_internal(
+        user_id=user_id,
+        body=StartResignationCheckRequest(assignee_type="self"),
+        db=db,
+        current_user=current_user,
+    )
+
+
+@router.post("/{user_id}/start-resignation-check")
+async def start_resignation_check(
+    user_id: int,
+    body: StartResignationCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """【v5.1 新增】发起离职核验流程
+
+    - 检测用户名下未完成安检任务
+    - assignee_type=self：任务归离职员工本人（assigned_user_id=user.id）
+    - assignee_type=other：任务直接改派给 assignee_id（assigned_user_id=接管人.id）
+    - 用户状态切到「待离职核验」+ audit log
+    - 所有核验任务完成后由系统自动切到「离职」
+    """
+    return await _start_resignation_check_internal(
+        user_id=user_id,
+        body=body,
+        db=db,
+        current_user=current_user,
+    )
+
+
+async def _start_resignation_check_internal(
+    user_id: int,
+    body: StartResignationCheckRequest,
+    db: Session,
+    current_user: User,
+):
+    """start-resignation-check 的内部实现，供 mark-resignation 复用"""
     user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
     if not user:
         raise HTTPException(status_code=404, detail="用户不存在")
-    
+
     if user.status == "离职":
         raise HTTPException(status_code=400, detail="该用户已经是离职状态")
-
+    if user.status == "待离职核验":
+        raise HTTPException(status_code=400, detail="该用户已处于待离职核验状态，请先等待完成或撤销")
     if user.role == "admin":
         raise HTTPException(status_code=400, detail="不能标记管理员为离职")
 
-    # 【新增：强级拦截】离职前检查是否还负责他人的安检执行工作
-    is_executor_for_others = db.query(Asset).filter(
-        Asset.safety_check_executor_id == user_id,
-        Asset.deleted_at.is_(None)
-    ).first()
-    
-    if is_executor_for_others:
-        # 为了输出更准确的提示，可以只扫一眼计数
-        count = db.query(Asset).filter(
-            Asset.safety_check_executor_id == user_id,
-            Asset.deleted_at.is_(None)
-        ).count()
-        raise HTTPException(
-            status_code=400, 
-            detail=f"该员工目前仍担任 {count} 件资产的检查执行人，请先将这些资产的安检职责移交他人，方可办理离职！"
-        )
+    # 校验接管人
+    if body.assignee_type == "other":
+        if not body.assignee_id:
+            raise HTTPException(status_code=400, detail="指定他人时必须提供 assignee_id")
+        assignee = db.query(User).filter(
+            User.id == body.assignee_id,
+            User.deleted_at.is_(None)
+        ).first()
+        if not assignee:
+            raise HTTPException(status_code=404, detail="接管人不存在")
+        assignee_id = assignee.id
+    elif body.assignee_type == "self":
+        assignee_id = user.id
+    else:
+        raise HTTPException(status_code=400, detail="assignee_type 必须 self 或 other")
 
-    _create_resignation_safety_tasks(db, user, current_user.id)
-    user.status = "离职"
+    # 创建离职前核验任务（沿用 _create_resignation_safety_tasks，但指定 assigned_user_id）
+    _create_resignation_safety_tasks_for_resignation(
+        db=db, user=user, current_user_id=current_user.id, assignee_id=assignee_id
+    )
+
+    # 状态变更 + audit
+    old_status = user.status
+    user.status = "待离职核验"
+    write_status_audit(db, user.id, old_status, "待离职核验", current_user.id, "发起离职核验")
+
     db.commit()
     db.refresh(user)
     return UserResponse.model_validate(user)
+
+
+def _create_resignation_safety_tasks_for_resignation(
+    db: Session,
+    user: User,
+    current_user_id: int,
+    assignee_id: int,
+) -> int:
+    """为离职员工生成 resignation 安全检查任务，assigned_user_id 由参数决定。
+
+    返回生成的任务资产关联总数（每件资产一条 task_asset）。
+    与原 _create_resignation_safety_tasks 区别：原函数固定 assigned_user_id=user.id，
+    本函数允许指定他人。
+    """
+    assets = db.query(Asset).filter(
+        Asset.user_id == user.id,
+        Asset.deleted_at.is_(None)
+    ).all()
+    if not assets:
+        return 0
+
+    tasks_to_create = {}
+    for asset in assets:
+        type_id = get_check_type_for_asset(db, asset)
+        if type_id is None:
+            logger.warning(
+                "离职核验：资产 %s (%s) 未匹配到有效检查类型，已跳过",
+                getattr(asset, "name", ""),
+                getattr(asset, "asset_number", asset.id),
+            )
+            continue
+        tasks_to_create.setdefault(type_id, []).append(asset.id)
+
+    ts_str = now_east8().strftime("%Y%m%d%H%M%S")
+    created = 0
+    for type_id, asset_ids in tasks_to_create.items():
+        task_number = f"SC-RESIGN-{ts_str}-{user.id}-{type_id}-{random.randint(100, 999)}"
+        task = SafetyCheckTask(
+            task_number=task_number,
+            check_type_id=type_id,
+            title=f"离职前安全检查 - {user.real_name}",
+            description=f"用户 {user.real_name} 离职流程触发的核验任务",
+            status="pending",
+            source="resignation",
+            created_by_id=current_user_id,
+        )
+        db.add(task)
+        db.flush()
+        for aid in asset_ids:
+            ta = TaskAsset(
+                task_id=task.id,
+                asset_id=aid,
+                assigned_user_id=assignee_id,  # 【v5.1】按参数决定
+                status="pending",
+            )
+            db.add(ta)
+            created += 1
+    return created
+
+
+@router.post("/{user_id}/cancel-resignation-check")
+async def cancel_resignation_check(
+    user_id: int,
+    body: CancelResignationCheckRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """【v5.1 新增】撤销离职核验流程
+
+    - 仅「待离职核验」状态可撤销
+    - 取消该用户相关的 resignation 任务
+    - 用户状态回到「在岗」
+    - 写 audit log 记录撤销原因
+    """
+    user = db.query(User).filter(User.id == user_id, User.deleted_at.is_(None)).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    if user.status != "待离职核验":
+        raise HTTPException(status_code=400, detail="用户不在待离职核验状态，无法撤销")
+
+    # 取消该用户相关的 resignation 任务
+    db.query(SafetyCheckTask).filter(
+        SafetyCheckTask.source == "resignation",
+        SafetyCheckTask.status.in_(["pending", "overdue"])
+    ).update({SafetyCheckTask.status: "cancelled"}, synchronize_session=False)
+    db.query(TaskAsset).filter(
+        TaskAsset.task_id.in_(
+            db.query(SafetyCheckTask.id).filter(SafetyCheckTask.source == "resignation")
+        ),
+        TaskAsset.status.in_(["pending", "overdue"])
+    ).update({TaskAsset.status: "cancelled"}, synchronize_session=False)
+
+    old_status = user.status
+    user.status = "在岗"
+    write_status_audit(db, user.id, old_status, "在岗", current_user.id, body.reason)
+
+    db.commit()
+    return {"message": "已撤销离职核验流程"}
 
 
 @router.put("/{user_id}", response_model=UserResponse)
@@ -320,7 +506,7 @@ async def update_user(
     
     # 记录旧状态
     old_status = user.status
-    
+
     # 更新字段
     if user_data.real_name is not None:
         user.real_name = user_data.real_name
@@ -329,28 +515,20 @@ async def update_user(
     if user_data.role is not None:
         user.role = user_data.role
     if user_data.status is not None:
+        # 【v5.1 Bug 4.5】不允许直接通过 PUT /users/{id} 把状态改成"离职"
+        # 必须改走 POST /start-resignation-check 走核验流程
+        if user_data.status == "离职" and old_status != "离职":
+            raise HTTPException(
+                status_code=400,
+                detail="不能直接修改状态为「离职」,请使用 POST /api/users/{id}/start-resignation-check 发起离职核验流程"
+            )
+        # 【v5.1 Bug 4.2】长期离岗(出差/借调/产假)改为由提交5专门处理
         user.status = user_data.status
     if user_data.password is not None:
         user.password_hash = get_password_hash(user_data.password)
-    
-    if old_status != "离职" and user.status == "离职":
-        # 【新增：强级拦截】离职前检查是否还负责他人的安检执行工作 (与 mark_user_resignation 同步)
-        is_executor_for_others = db.query(Asset).filter(
-            Asset.safety_check_executor_id == user_id,
-            Asset.deleted_at.is_(None)
-        ).first()
-        
-        if is_executor_for_others:
-            count = db.query(Asset).filter(
-                Asset.safety_check_executor_id == user_id,
-                Asset.deleted_at.is_(None)
-            ).count()
-            raise HTTPException(
-                status_code=400, 
-                detail=f"该员工目前仍担任 {count} 件资产的检查执行人，请先将这些资产的安检职责移交他人，方可将其状态更改为离职！"
-            )
-            
-        _create_resignation_safety_tasks(db, user, current_user.id)
+
+    if old_status != user.status:
+        write_status_audit(db, user.id, old_status, user.status, current_user.id, "管理员修改")
 
     db.commit()
     db.refresh(user)

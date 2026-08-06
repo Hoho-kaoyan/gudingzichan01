@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_, or_
 from sqlalchemy.exc import IntegrityError
+from pydantic import BaseModel, Field
 import random
 import string
 import re
@@ -608,12 +609,66 @@ async def cancel_task(
     task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="任务不存在")
-    
+
     if task.status == "completed":
         raise HTTPException(status_code=400, detail="已完成的任务不能取消")
-    
+
     task.status = "cancelled"
     db.commit()
-    
+
     return {"message": "任务已取消"}
+
+
+class ReassignTaskRequest(BaseModel):
+    """v5.1 改派请求"""
+    new_assigned_user_id: int = Field(..., description="新执行人ID")
+    asset_ids: Optional[List[int]] = Field(None, description="指定要改派的 task_asset.id 列表；None 表示全部")
+
+
+@router.put("/{task_id}/reassign")
+async def reassign_task(
+    task_id: int,
+    body: ReassignTaskRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_admin_user)
+):
+    """【v5.1 Bug 4.8】管理员改派任务给其他人。
+    注意：只改 assigned_user_id，不代为提交结果（结果仍由接管人自己提）。
+    改派后会自动检查被改派原 user 的所有 resignation 任务是否都已完成，若是则切到「离职」。
+    """
+    task = db.query(SafetyCheckTask).filter(SafetyCheckTask.id == task_id).first()
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+
+    new_user = db.query(User).filter(
+        User.id == body.new_assigned_user_id,
+        User.deleted_at.is_(None)
+    ).first()
+    if not new_user:
+        raise HTTPException(status_code=404, detail="新执行人不存在")
+
+    q = db.query(TaskAsset).filter(
+        TaskAsset.task_id == task_id,
+        TaskAsset.status == "pending"
+    )
+    if body.asset_ids:
+        q = q.filter(TaskAsset.id.in_(body.asset_ids))
+
+    affected_old_ids: set = set()
+    for ta in q.all():
+        affected_old_ids.add(ta.assigned_user_id)
+        ta.assigned_user_id = body.new_assigned_user_id
+
+    db.commit()
+
+    # 改派后检查每个被改派原 user 是否所有核验任务都已完成 → 自动切到"离职"
+    from routers.users import try_finalize_resignation
+    for old_uid in affected_old_ids:
+        try_finalize_resignation(db, old_uid)
+
+    return {
+        "message": "改派成功",
+        "reassigned_count": len(affected_old_ids),
+        "new_assigned_user_id": body.new_assigned_user_id,
+    }
 

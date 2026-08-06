@@ -114,145 +114,170 @@ async def get_return_request(
     return ReturnRequestResponse.model_validate(request)
 
 
-@router.post("/", response_model=ReturnRequestResponse)
+@router.post("/", response_model=List[ReturnRequestResponse])
 async def create_return_request(
     return_data: ReturnRequestCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """创建资产退回仓库申请"""
-    # 检查资产是否存在（只查询未删除的）
-    asset = db.query(Asset).filter(
-        Asset.id == return_data.asset_id,
+    """批量创建资产退回仓库申请（v5.1 改造）
+
+    - 一次提交 N 个资产，统一创建 N 条 ReturnRequest
+    - 整批共用一组可修改字段（mac_address / ip_address / ...）
+    - 任一资产不满足条件则整批拒绝
+    """
+    asset_ids = return_data.asset_ids
+    if not asset_ids:
+        raise HTTPException(status_code=400, detail="至少选择一件资产")
+
+    # 1) 校验所有资产存在、未删除、状态在用
+    assets = db.query(Asset).filter(
+        Asset.id.in_(asset_ids),
         Asset.deleted_at.is_(None)
-    ).first()
-    if not asset:
-        raise HTTPException(status_code=404, detail="资产不存在")
-    
-    # 检查资产是否在使用中
-    if asset.status != "在用":
-        raise HTTPException(status_code=400, detail="只能退回在用状态的资产")
+    ).all()
+    if len(assets) != len(set(asset_ids)):
+        raise HTTPException(status_code=400, detail="部分资产不存在或已删除")
+    asset_map = {a.id: a for a in assets}
 
-    # 【Bug 1.2 修复 v5.1】互斥检查：同一资产已有待处理的交接/退回申请则拒绝
-    pending_transfer = db.query(TransferRequest).filter(
-        TransferRequest.asset_id == return_data.asset_id,
-        TransferRequest.status.in_(["waiting_confirmation", "pending"])
-    ).first()
-    if pending_transfer:
-        raise HTTPException(status_code=400, detail="该资产已有待处理的交接申请,请先处理")
-
-    pending_return = db.query(ReturnRequest).filter(
-        ReturnRequest.asset_id == return_data.asset_id,
-        ReturnRequest.status == "pending"
-    ).first()
-    if pending_return:
-        raise HTTPException(status_code=400, detail="该资产已有待处理的退回申请,请先处理")
-
-    # 检查权限：
-    # 1. 管理员：全量
-    # 2. 组长：只能退回本组资产
-    # 3. 普通用户：只能退回自己名下的资产
-    if current_user.role == "admin":
-        pass
-    elif current_user.role == "leader":
-        if asset.user_group != current_user.group:
-            raise HTTPException(status_code=403, detail="组长只能代退本组关联的资产")
-    else:
-        if asset.user_id != current_user.id:
-            raise HTTPException(status_code=403, detail="只能退回自己名下的资产")
-    
-    user_id = asset.user_id or current_user.id
-    
-    # 【只查本单资产】本单资产是否已完成安检，未完成则不允许提交退库
+    # 2) 逐资产校验：状态 / 互斥 / 权限 / 安检拦截
     from routers.transfers import check_unfinished_tasks_for_asset_user
-    check_unfinished_tasks_for_asset_user(db, return_data.asset_id, user_id)
-    
-    # 创建退回申请，保存申请人修改的字段
-    db_request = ReturnRequest(
-        asset_id=return_data.asset_id,
-        user_id=user_id,
-        reason=return_data.reason,
-        status="pending",
-        # 保存申请人修改的字段（退回仓库，不指定新保管人）
-        mac_address=return_data.mac_address,
-        ip_address=return_data.ip_address,
-        office_location=return_data.office_location,
-        floor=return_data.floor,
-        seat_number=return_data.seat_number,
-        new_user_id=None,  # 退回仓库，不指定新保管人
-        remark=return_data.remark
-    )
-    db.add(db_request)
-    db.flush()  # 先flush获取ID
-    
-    # 获取退回用户信息
-    return_user = db.query(User).filter(User.id == user_id).first()
-    
-    # 构建修改说明
-    changes = []
-    if return_data.mac_address is not None:
-        changes.append(f"MAC地址: {asset.mac_address or ''} -> {return_data.mac_address}")
-    if return_data.ip_address is not None:
-        changes.append(f"IP地址: {asset.ip_address or ''} -> {return_data.ip_address}")
-    if return_data.office_location is not None:
-        changes.append(f"存放地点: {asset.office_location or ''} -> {return_data.office_location}")
-    if return_data.floor is not None:
-        changes.append(f"存放楼层: {asset.floor or ''} -> {return_data.floor}")
-    if return_data.seat_number is not None:
-        changes.append(f"座位号: {asset.seat_number or ''} -> {return_data.seat_number}")
-    if return_data.remark is not None:
-        changes.append(f"备注: {asset.remark or ''} -> {return_data.remark}")
+    for aid in asset_ids:
+        asset = asset_map[aid]
+        if asset.status != "在用":
+            raise HTTPException(
+                status_code=400,
+                detail=f"资产 {asset.asset_number} 状态为「{asset.status}」,无法退回"
+            )
 
+        # 互斥检查
+        pending_transfer = db.query(TransferRequest).filter(
+            TransferRequest.asset_id == aid,
+            TransferRequest.status.in_(["waiting_confirmation", "pending"])
+        ).first()
+        if pending_transfer:
+            raise HTTPException(
+                status_code=400,
+                detail=f"资产 {asset.asset_number} 已有待处理的交接申请,请先处理"
+            )
+        pending_return = db.query(ReturnRequest).filter(
+            ReturnRequest.asset_id == aid,
+            ReturnRequest.status == "pending"
+        ).first()
+        if pending_return:
+            raise HTTPException(
+                status_code=400,
+                detail=f"资产 {asset.asset_number} 已有待处理的退回申请,请先处理"
+            )
+
+        # 权限校验
+        if current_user.role == "admin":
+            pass
+        elif current_user.role == "leader":
+            if asset.user_group != current_user.group:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"资产 {asset.asset_number} 不在本组,组长无法代退"
+                )
+        else:
+            if asset.user_id != current_user.id:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"资产 {asset.asset_number} 不在您名下,无法退回"
+                )
+
+        # 安检拦截
+        check_unfinished_tasks_for_asset_user(db, aid, asset.user_id or current_user.id)
+
+    # 3) 整批共用字段快照（用于变更说明 & 历史记录）
+    common_mac = return_data.mac_address
+    common_ip = return_data.ip_address
+    common_office = return_data.office_location
+    common_floor = return_data.floor
+    common_seat = return_data.seat_number
+    common_remark = return_data.remark
+
+    changes = []
+    if common_mac is not None: changes.append(f"MAC地址:{common_mac}")
+    if common_ip is not None: changes.append(f"IP地址:{common_ip}")
+    if common_office is not None: changes.append(f"存放地点:{common_office}")
+    if common_floor is not None: changes.append(f"存放楼层:{common_floor}")
+    if common_seat is not None: changes.append(f"座位号:{common_seat}")
+    if common_remark is not None: changes.append(f"备注:{common_remark}")
     change_desc = ";".join(changes) if changes else "无修改"
-    
-    # 记录退回申请历史
-    try:
-        create_history = get_create_history_record()
-        old_value = {
-            "user_id": user_id,
-            "user_name": return_user.real_name if return_user else "",
-            "status": asset.status,
-            "mac_address": asset.mac_address,
-            "ip_address": asset.ip_address,
-            "office_location": asset.office_location,
-            "floor": asset.floor,
-            "seat_number": asset.seat_number,
-            "remark": asset.remark
-        }
-        new_value = {
-            "user_id": None,  # 退回仓库，使用人置空
-            "status": "在库",
-            "mac_address": return_data.mac_address,
-            "ip_address": return_data.ip_address,
-            "office_location": return_data.office_location,
-            "floor": return_data.floor,
-            "seat_number": return_data.seat_number,
-            "remark": return_data.remark
-        }
-        create_history(
-            db=db,
-            asset_id=return_data.asset_id,
-            action_type="return",
-            action_description=f"申请资产退回仓库:退回人 {return_user.real_name if return_user else ''},修改内容:{change_desc}",
-            operator_id=current_user.id,
-            old_value=old_value,
-            new_value=new_value,
-            related_request_id=db_request.id,
-            related_request_type="return"
+
+    # 4) 创建 N 条 ReturnRequest
+    created = []
+    for aid in asset_ids:
+        asset = asset_map[aid]
+        user_id = asset.user_id or current_user.id
+        rr = ReturnRequest(
+            asset_id=aid,
+            user_id=user_id,
+            reason=return_data.reason,
+            status="pending",
+            mac_address=common_mac,
+            ip_address=common_ip,
+            office_location=common_office,
+            floor=common_floor,
+            seat_number=common_seat,
+            new_user_id=None,
+            remark=common_remark,
         )
-    except Exception as e:
-        logger.error(f"记录退回历史失败: {e}", exc_info=True)
-    
+        db.add(rr)
+        db.flush()
+
+        return_user = db.query(User).filter(User.id == user_id).first()
+        # 写历史
+        try:
+            create_history = get_create_history_record()
+            old_value = {
+                "user_id": user_id,
+                "user_name": return_user.real_name if return_user else "",
+                "status": asset.status,
+                "mac_address": asset.mac_address,
+                "ip_address": asset.ip_address,
+                "office_location": asset.office_location,
+                "floor": asset.floor,
+                "seat_number": asset.seat_number,
+                "remark": asset.remark,
+            }
+            new_value = {
+                "user_id": None,
+                "status": "在库",
+                "mac_address": common_mac,
+                "ip_address": common_ip,
+                "office_location": common_office,
+                "floor": common_floor,
+                "seat_number": common_seat,
+                "remark": common_remark,
+            }
+            create_history(
+                db=db,
+                asset_id=aid,
+                action_type="return",
+                action_description=f"申请资产退回仓库(批量):退回人 {return_user.real_name if return_user else ''},修改内容:{change_desc}",
+                operator_id=current_user.id,
+                old_value=old_value,
+                new_value=new_value,
+                related_request_id=rr.id,
+                related_request_type="return",
+            )
+        except Exception as e:
+            logger.error(f"记录退回历史失败: {e}", exc_info=True)
+
+        created.append(rr)
+
     db.commit()
-    db.refresh(db_request)
+
     # 重新加载关联数据
-    db_request = db.query(ReturnRequest).options(
+    ids = [r.id for r in created]
+    loaded = db.query(ReturnRequest).options(
         joinedload(ReturnRequest.asset),
         joinedload(ReturnRequest.user),
         joinedload(ReturnRequest.new_user),
         joinedload(ReturnRequest.approver)
-    ).filter(ReturnRequest.id == db_request.id).first()
-    return ReturnRequestResponse.model_validate(db_request)
+    ).filter(ReturnRequest.id.in_(ids)).all()
+    return [ReturnRequestResponse.model_validate(x) for x in loaded]
 
 
 @router.delete("/{request_id}")

@@ -15,6 +15,7 @@ def get_create_history_record():
     from routers import asset_history
     return asset_history.create_history_record
 from utils_time import now_east8, now_utc_naive
+from routers.notifications import create_notification
 
 router = APIRouter()
 
@@ -104,7 +105,25 @@ async def approve_request(
                 )
 
                 logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 审批通过资产交接申请: 资产ID {asset.id}({asset.asset_number}), 从 {from_user.real_name if from_user else ''} 转给 {to_user.real_name if to_user else ''}, 申请ID {request.id}")
-                
+
+                # 【Bug 1.6 修复 v5.1】写入审批通知（转出人 + 转入人）
+                from_user_name = from_user.real_name if from_user else "原使用人"
+                to_user_name = to_user.real_name if to_user else "新使用人"
+                create_notification(
+                    db, user_id=request.from_user_id,
+                    type_="transfer_approved",
+                    title="资产交接已批准",
+                    content=f"您的资产 {asset.asset_number}({asset.name}) 已交接给 {to_user_name},如有异议请联系管理员。",
+                    related_request_type="transfer", related_request_id=request.id,
+                )
+                create_notification(
+                    db, user_id=request.to_user_id,
+                    type_="transfer_approved",
+                    title="您收到了交接资产",
+                    content=f"{from_user_name} 将资产 {asset.asset_number}({asset.name}) 交接给您。",
+                    related_request_type="transfer", related_request_id=request.id,
+                )
+
                 # 记录审批通过历史
                 # operator_id 应该是实际发起申请的用户，而不是转出用户
                 # 如果管理员代为申请，应该显示管理员；否则显示转出用户
@@ -140,6 +159,15 @@ async def approve_request(
                 if linked_task and linked_task.status in ("pending", "overdue"):
                     linked_task.status = "cancelled"
                     logger.info(f"审批拒绝交接：联动安检任务 #{linked_task_id} 已取消")
+
+            # 【Bug 1.6 修复 v5.1】写入审批拒绝通知（仅转出人）
+            create_notification(
+                db, user_id=request.from_user_id,
+                type_="transfer_rejected",
+                title="资产交接被拒绝",
+                content=f"您的资产交接申请(ID:{request.id})被管理员拒绝,原因:{approval_data.comment or '无'}。",
+                related_request_type="transfer", related_request_id=request.id,
+            )
 
             try:
                 create_history = get_create_history_record()
@@ -250,10 +278,37 @@ async def approve_request(
                     )
                 except Exception as e:
                     logger.error(f"记录审批历史失败: {e}", exc_info=True)
+
+                # 【Bug 1.6 修复 v5.1】写入退回通过通知（退库申请人 + 资产原使用人）
+                asset_number = asset.asset_number if asset else "N/A"
+                create_notification(
+                    db, user_id=request.user_id,
+                    type_="return_approved",
+                    title="您的退回申请已批准",
+                    content=f"资产 {asset_number} 已退回仓库。",
+                    related_request_type="return", related_request_id=request.id,
+                )
+                if asset and asset.user_id and asset.user_id != request.user_id:
+                    create_notification(
+                        db, user_id=asset.user_id,
+                        type_="return_approved",
+                        title="资产退回已批准",
+                        content=f"您的资产 {asset_number} 已退回仓库。",
+                        related_request_type="return", related_request_id=request.id,
+                    )
         else:
             # 记录审批拒绝历史
             asset = db.query(Asset).filter(Asset.id == request.asset_id).first()
             logger.info(f"管理员 {current_user.ehr_number}({current_user.real_name}) 拒绝资产退回申请: 资产ID {request.asset_id}({asset.asset_number if asset else 'N/A'}), 申请ID {request.id}")
+
+            # 【Bug 1.6 修复 v5.1】写入退回拒绝通知（仅退库申请人）
+            create_notification(
+                db, user_id=request.user_id,
+                type_="return_rejected",
+                title="退回申请被拒绝",
+                content=f"您的资产退回申请(ID:{request.id})被管理员拒绝,原因:{approval_data.comment or '无'}。",
+                related_request_type="return", related_request_id=request.id,
+            )
             
             try:
                 create_history = get_create_history_record()

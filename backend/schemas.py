@@ -303,16 +303,17 @@ class TransferRequestResponse(BaseModel):
 
 # 退回申请模式
 class ReturnRequestCreate(BaseModel):
-    asset_id: int = Field(..., description="资产ID")
+    """v5.1 改造为批量退回：一次提交 N 个资产"""
+    asset_ids: List[int] = Field(..., min_length=1, description="要退回的资产ID列表（至少1件）")
     reason: Optional[str] = Field(None, description="退回原因")
-    # 申请人可修改的字段
-    mac_address: Optional[str] = Field(None, description="申请人修改的MAC地址")
-    ip_address: Optional[str] = Field(None, description="申请人修改的IP地址")
-    office_location: Optional[str] = Field(None, description="申请人修改的存放办公地点")
-    floor: Optional[str] = Field(None, description="申请人修改的存放楼层")
-    seat_number: Optional[str] = Field(None, description="申请人修改的座位号")
-    new_user_id: Optional[int] = Field(None, description="申请人修改的保管人ID")
-    remark: Optional[str] = Field(None, description="申请人修改的备注说明")
+    # 申请人修改的字段（整批共用，简化首版；如需逐资产不同，放二期）
+    mac_address: Optional[str] = Field(None, description="申请人修改的MAC地址（整批共用）")
+    ip_address: Optional[str] = Field(None, description="申请人修改的IP地址（整批共用）")
+    office_location: Optional[str] = Field(None, description="申请人修改的存放办公地点（整批共用）")
+    floor: Optional[str] = Field(None, description="申请人修改的存放楼层（整批共用）")
+    seat_number: Optional[str] = Field(None, description="申请人修改的座位号（整批共用）")
+    new_user_id: Optional[int] = Field(None, description="申请人修改的保管人ID（整批共用）")
+    remark: Optional[Text] = Field(None, description="申请人修改的备注说明（整批共用）")
 
 
 class ReturnRequestResponse(BaseModel):

@@ -73,26 +73,31 @@ const ReturnManagement = () => {
     setModalVisible(true)
   }
 
-  const handleAssetChange = (assetId) => {
-    const asset = assets.find(a => a.id === assetId)
-    setSelectedAsset(asset)
-    if (asset) {
-      // 预填充当前资产的值
-      form.setFieldsValue({
-        mac_address: asset.mac_address || '',
-        ip_address: asset.ip_address || '',
-        office_location: asset.office_location || '',
-        floor: asset.floor || '',
-        seat_number: asset.seat_number || '',
-        remark: asset.remark || ''
-      })
+  const handleAssetsChange = (assetIds) => {
+    // v5.1 批量退回：多选资产时预填第一件的字段（如用户不修改则视为不修改）
+    if (assetIds && assetIds.length > 0) {
+      const firstAsset = assets.find(a => a.id === assetIds[0])
+      setSelectedAsset(firstAsset || null)
+      if (firstAsset) {
+        form.setFieldsValue({
+          mac_address: firstAsset.mac_address || '',
+          ip_address: firstAsset.ip_address || '',
+          office_location: firstAsset.office_location || '',
+          floor: firstAsset.floor || '',
+          seat_number: firstAsset.seat_number || '',
+          remark: firstAsset.remark || ''
+        })
+      }
+    } else {
+      setSelectedAsset(null)
     }
   }
 
   const handleSubmit = async (values) => {
     try {
+      // v5.1 批量退回：前端字段名从 asset_id 改成 asset_ids（数组）
       const payload = {
-        asset_id: values.asset_id,
+        asset_ids: values.asset_ids,
         reason: values.reason || undefined
       }
 
@@ -121,7 +126,9 @@ const ReturnManagement = () => {
       }
 
       await api.post('/returns/', payload)
-      message.success('退回申请已提交')
+      // v5.1 批量退回：后端返回 List，根据数量提示
+      const cnt = (values.asset_ids || []).length
+      message.success(`已提交 ${cnt} 件资产的退回申请,待管理员审批`)
       setModalVisible(false)
       setSelectedAsset(null)
       fetchReturns(filters)
@@ -276,13 +283,17 @@ const ReturnManagement = () => {
           onFinish={handleSubmit}
         >
           <Form.Item
-            label="资产"
-            name="asset_id"
-            rules={[{ required: true, message: '请选择资产' }]}
+            label="资产（可多选，v5.1 批量退回）"
+            name="asset_ids"
+            rules={[{ required: true, message: '请至少选择一件资产' }, {
+              validator: (_, v) => (v && v.length >= 1) ? Promise.resolve() : Promise.reject(new Error('请至少选择一件资产'))
+            }]}
           >
             <Select
-              placeholder={isAdmin ? '请选择要退回的资产' : '请选择自己名下的资产'}
-              onChange={handleAssetChange}
+              mode="multiple"
+              placeholder={isAdmin ? '请选择要退回的资产（可多选）' : '请选择自己名下的资产（可多选）'}
+              onChange={handleAssetsChange}
+              maxTagCount="responsive"
             >
               {selectableAssets.map(asset => (
                 <Option key={asset.id} value={asset.id}>

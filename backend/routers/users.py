@@ -58,6 +58,52 @@ def write_status_audit(
     ))
 
 
+def _auto_return_assets_on_long_leave(
+    db: Session,
+    user: User,
+    current_user_id: int,
+    new_status: str,
+) -> dict:
+    """【v5.1 Bug 4.2】长期离岗时自动把名下资产改为「在库」。
+
+    - user.user_id 清空、user_group 清空、safety_check_executor_id 清空
+    - 现有 pending 安检任务标 `returned`
+    - audit log 记录自动处理数量
+    - 返回 warning_payload 给前端弹窗提示
+    """
+    affected_assets = db.query(Asset).filter(
+        Asset.user_id == user.id,
+        Asset.deleted_at.is_(None)
+    ).all()
+    affected_count = 0
+    asset_ids = []
+    for asset in affected_assets:
+        asset.user_id = None
+        asset.user_group = None
+        asset.safety_check_executor_id = None
+        asset.safety_check_executor_name = None
+        asset.status = "在库"
+        affected_count += 1
+        asset_ids.append(asset.id)
+
+    if asset_ids:
+        db.query(TaskAsset).filter(
+            TaskAsset.asset_id.in_(asset_ids),
+            TaskAsset.status == "pending"
+        ).update({TaskAsset.status: "returned"}, synchronize_session=False)
+
+    logger.info(
+        f"长期离岗自动处理: 用户 {user.ehr_number}({user.real_name}) 状态变为「{new_status}」,"
+        f"自动将 {affected_count} 件资产改为「在库」"
+    )
+    return {
+        "warning": "long_leave",
+        "message": f"该员工状态变更为「{new_status}」,系统已自动将名下 {affected_count} 件资产改为「在库」。",
+        "affected_asset_count": affected_count,
+        "user_id": user.id,
+    }
+
+
 def try_finalize_resignation(db: Session, user_id: int) -> bool:
     """【v5.1 Bug 4.3 新增】检查用户的所有 resignation 安检任务是否完成。
     若是，把状态从「待离职核验」自动切到「离职」，写 audit log。
@@ -522,7 +568,10 @@ async def update_user(
                 status_code=400,
                 detail="不能直接修改状态为「离职」,请使用 POST /api/users/{id}/start-resignation-check 发起离职核验流程"
             )
-        # 【v5.1 Bug 4.2】长期离岗(出差/借调/产假)改为由提交5专门处理
+        # 【v5.1 Bug 4.2】长期离岗(出差/借调/产假)自动改在库
+        warning_payload = None
+        if user_data.status in {"长期出差", "借调", "产假"} and old_status not in {"长期出差", "借调", "产假"}:
+            warning_payload = _auto_return_assets_on_long_leave(db, user, current_user.id, user_data.status)
         user.status = user_data.status
     if user_data.password is not None:
         user.password_hash = get_password_hash(user_data.password)
@@ -532,7 +581,12 @@ async def update_user(
 
     db.commit()
     db.refresh(user)
-    return UserResponse.model_validate(user)
+
+    resp = UserResponse.model_validate(user)
+    if warning_payload:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content={**resp.model_dump(mode='json'), **warning_payload})
+    return resp
 
 
 @router.delete("/{user_id}")

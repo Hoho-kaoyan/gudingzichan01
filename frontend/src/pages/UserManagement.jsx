@@ -213,20 +213,24 @@ const UserManagement = () => {
     setResignationModalVisible(true)
   }
 
-  // 确认标记离职
+  // 确认标记离职（v5.1 走"待离职核验"过渡态）
   const handleConfirmMarkResignation = async () => {
     if (!resigningUser) return
 
     setMarkingResignation(true)
     try {
-      // 调用后端接口（假设路径为 PUT /api/users/{user_id}/mark-resignation）
-      const response = await api.put(`/users/${resigningUser.id}/mark-resignation`)
+      // 后端 mark-resignation 已兼容：默认 assignee_type=self
+      // 进入"待离职核验"过渡态，离职员工仍可登录完成所有核验任务，
+      // 系统会自动从"待离职核验"切到"离职"
+      await api.put(`/users/${resigningUser.id}/mark-resignation`)
 
       if (userAssetCount > 0) {
-        const taskCount = response.data?.task_count || userAssetCount
-        message.success(`标记离职成功，已为该用户创建${taskCount}个安全检查任务`)
+        message.success(
+          `已进入「待离职核验」,已为该用户创建 ${userAssetCount} 个核验任务。` +
+          `所有任务完成后状态将自动切到「离职」。`
+        )
       } else {
-        message.success('标记离职成功')
+        message.success('已进入「待离职核验」状态')
       }
 
       setResignationModalVisible(false)
@@ -238,6 +242,24 @@ const UserManagement = () => {
       message.error(errorMsg)
     } finally {
       setMarkingResignation(false)
+    }
+  }
+
+  // 【v5.1 Bug 4.4】撤销待离职核验
+  const handleCancelResignation = async (record) => {
+    let reason = ''
+    try {
+      // 用 Modal.confirm 不可直接拿输入，改用简易 prompt
+      reason = window.prompt('请填写撤销原因（必填）：')
+      if (!reason || !reason.trim()) {
+        message.warning('撤销原因不能为空')
+        return
+      }
+      await api.post(`/users/${record.id}/cancel-resignation-check`, { reason: reason.trim() })
+      message.success('已撤销离职核验流程，状态回到「在岗」')
+      fetchUsers()
+    } catch (error) {
+      message.error(error.response?.data?.detail || '撤销失败')
     }
   }
 
@@ -278,6 +300,7 @@ const UserManagement = () => {
       render: (status) => {
         const statusConfig = {
           '在岗': { color: 'success', text: '在岗' },
+          '待离职核验': { color: 'gold', text: '待离职核验' },
           '离职': { color: 'error', text: '离职' },
           '长期出差': { color: 'processing', text: '长期出差' },
           '借调': { color: 'warning', text: '借调' },
@@ -297,7 +320,7 @@ const UserManagement = () => {
             <Button type="link" icon={<EditOutlined />} onClick={() => handleEdit(record)}>
               编辑
             </Button>
-            {record.status !== '离职' && record.role !== 'admin' && (
+            {record.status !== '离职' && record.status !== '待离职核验' && record.role !== 'admin' && (
               <Button
                 type="link"
                 danger
@@ -305,6 +328,14 @@ const UserManagement = () => {
                 onClick={() => handleOpenMarkResignation(record)}
               >
                 标记离职
+              </Button>
+            )}
+            {record.status === '待离职核验' && (
+              <Button
+                type="link"
+                onClick={() => handleCancelResignation(record)}
+              >
+                撤销核验
               </Button>
             )}
             {!isSelf && (
@@ -465,17 +496,51 @@ const UserManagement = () => {
             <Form.Item
               label="密码"
               name="password"
-              rules={[{ required: true, message: '请输入密码' }]}
+              rules={[
+                { required: true, message: '请输入密码' },
+                { min: 8, message: '密码至少 8 位' },
+                {
+                  validator: (_, value) => {
+                    if (!value) return Promise.resolve()
+                    const checks = []
+                    if (!/[A-Z]/.test(value)) checks.push('大写字母')
+                    if (!/[a-z]/.test(value)) checks.push('小写字母')
+                    if (!/[0-9]/.test(value)) checks.push('数字')
+                    if (!/[^\w]/.test(value)) checks.push('特殊字符')
+                    return checks.length
+                      ? Promise.reject(new Error(`密码缺少：${checks.join('、')}`))
+                      : Promise.resolve()
+                  }
+                }
+              ]}
+              hasFeedback
             >
-              <Input.Password />
+              <Input.Password placeholder="至少 8 位,含大小写字母、数字、特殊字符" />
             </Form.Item>
           )}
           {editingUser && (
             <Form.Item
               label="新密码（留空则不修改）"
               name="password"
+              rules={[
+                {
+                  validator: (_, value) => {
+                    if (!value) return Promise.resolve()  // 留空 = 不修改
+                    if (value.length < 8) return Promise.reject(new Error('密码至少 8 位'))
+                    const checks = []
+                    if (!/[A-Z]/.test(value)) checks.push('大写字母')
+                    if (!/[a-z]/.test(value)) checks.push('小写字母')
+                    if (!/[0-9]/.test(value)) checks.push('数字')
+                    if (!/[^\w]/.test(value)) checks.push('特殊字符')
+                    return checks.length
+                      ? Promise.reject(new Error(`密码缺少：${checks.join('、')}`))
+                      : Promise.resolve()
+                  }
+                }
+              ]}
+              hasFeedback
             >
-              <Input.Password />
+              <Input.Password placeholder="留空不修改；如需修改请按密码规范" />
             </Form.Item>
           )}
         </Form>

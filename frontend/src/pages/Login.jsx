@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Form, Input, Button, Card, message, Alert } from 'antd'
+import { Form, Input, Button, Card, message, Alert, Modal } from 'antd'
 
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useAuth } from '../contexts/AuthContext'
@@ -13,7 +13,7 @@ const Login = () => {
   const [errorMsg, setErrorMsg] = useState('')
 
   const navigate = useNavigate()
-  const { login, checkEHR } = useAuth()
+  const { login, checkEHR, requirePasswordChange } = useAuth()
 
   const handleEHRBlur = async () => {
     const ehrNumber = form.getFieldValue('ehr_number')
@@ -42,7 +42,17 @@ const Login = () => {
     try {
       const success = await login(values.ehr_number, values.password)
       if (success) {
-        navigate('/dashboard')
+        // 【v5.1 Bug 2.3】首次登录密码需修改提示
+        if (requirePasswordChange) {
+          Modal.info({
+            title: '请修改初始密码',
+            content: '您正在使用系统生成的初始密码，首次登录需要修改密码后才能使用完整功能。',
+            okText: '前往修改',
+            onOk: () => navigate('/change-password'),
+          })
+        } else {
+          navigate('/dashboard')
+        }
       }
     } catch (error) {
       // 处理具体的错误显示

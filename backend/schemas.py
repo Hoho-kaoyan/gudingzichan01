@@ -327,7 +327,7 @@ class ReturnRequestCreate(BaseModel):
     floor: Optional[str] = Field(None, description="申请人修改的存放楼层（整批共用）")
     seat_number: Optional[str] = Field(None, description="申请人修改的座位号（整批共用）")
     new_user_id: Optional[int] = Field(None, description="申请人修改的保管人ID（整批共用）")
-    remark: Optional[Text] = Field(None, description="申请人修改的备注说明（整批共用）")
+    remark: Optional[str] = Field(None, description="申请人修改的备注说明（整批共用）")
 
 
 class ReturnRequestResponse(BaseModel):

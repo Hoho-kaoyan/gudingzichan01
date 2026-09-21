@@ -694,9 +694,15 @@ async def import_users(
                 ehr_number = cell_to_str(row.get('EHR号', ''))
                 real_name = cell_to_str(row.get('姓名', ''))
                 group = cell_to_str(row.get('组别', ''))
-                role = cell_to_str(row.get('角色', '')) or 'user'
+                role_raw = cell_to_str(row.get('角色', '')).strip()
+                role = role_raw.lower() if role_raw else 'user'
                 status = cell_to_str(row.get('状态', '')) or '在岗'
                 password = cell_to_str(row.get('密码', '')) or 'Aa@1234567'
+
+                # 角色合法性英文校验（必须为 admin/leader/user，禁止输入中文如“管理员”）
+                valid_roles = {"admin", "leader", "user"}
+                if role not in valid_roles:
+                    raise ValueError(f"角色 '{role_raw}' 不合法，必须为英文：admin（管理员）/ leader（组长）/ user（普通用户）")
                 
                 # 状态合法性校验
                 valid_statuses = {"在岗", "离职", "长期出差", "借调", "产假"}
@@ -834,7 +840,13 @@ async def resolve_user_import_conflicts(
             row = d.row_data
             user.real_name = cell_to_str(row.get('姓名', user.real_name))
             user.group = cell_to_str(row.get('组别', user.group))
-            user.role = cell_to_str(row.get('角色', user.role))
+            
+            raw_role = cell_to_str(row.get('角色', user.role)).strip().lower()
+            if raw_role:
+                if raw_role not in {"admin", "leader", "user"}:
+                    raise ValueError(f"角色 '{raw_role}' 不合法，必须为英文：admin / leader / user")
+                user.role = raw_role
+
             user.status = cell_to_str(row.get('状态', user.status))
             
             pwd = cell_to_str(row.get('密码', ''))

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions, Tag } from 'antd'
-import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined, UserDeleteOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, Upload, message, Popconfirm, Space, Alert, Descriptions, Tag, Tooltip } from 'antd'
+import { PlusOutlined, EditOutlined, DeleteOutlined, UploadOutlined, SearchOutlined, ReloadOutlined, UserDeleteOutlined, QuestionCircleOutlined } from '@ant-design/icons'
 import api from '../utils/api'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -386,13 +386,17 @@ const UserManagement = () => {
       <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
         <h1>用户管理</h1>
         <Space>
-          <Upload
-            accept=".xlsx,.xls"
-            beforeUpload={handleImport}
-            showUploadList={false}
-          >
-            <Button icon={<UploadOutlined />}>批量导入</Button>
-          </Upload>
+          <Tooltip title="Excel列说明：EHR号（7位数字）、姓名、组别、角色（必须为英文：admin / leader / user）、状态、密码">
+            <Upload
+              accept=".xlsx,.xls"
+              beforeUpload={handleImport}
+              showUploadList={false}
+            >
+              <Button icon={<UploadOutlined />}>
+                批量导入 <QuestionCircleOutlined style={{ color: '#8c8c8c' }} />
+              </Button>
+            </Upload>
+          </Tooltip>
           <Button type="primary" icon={<PlusOutlined />} onClick={handleAdd}>
             新增用户
           </Button>
@@ -495,14 +499,24 @@ const UserManagement = () => {
             </Select>
           </Form.Item>
           <Form.Item
-            label="角色"
+            label="角色（英文）"
             name="role"
-            rules={[{ required: true, message: '请选择角色' }]}
+            rules={[
+              { required: true, message: '请选择角色' },
+              {
+                validator: (_, value) => {
+                  if (value && !['user', 'leader', 'admin'].includes(value)) {
+                    return Promise.reject(new Error('角色必须为英文：user / leader / admin'))
+                  }
+                  return Promise.resolve()
+                }
+              }
+            ]}
           >
-            <Select>
-              <Select.Option value="user">普通用户</Select.Option>
-              <Select.Option value="leader">组长</Select.Option>
-              <Select.Option value="admin">管理员</Select.Option>
+            <Select placeholder="请选择角色">
+              <Select.Option value="user">普通用户 (user)</Select.Option>
+              <Select.Option value="leader">组长 (leader)</Select.Option>
+              <Select.Option value="admin">管理员 (admin)</Select.Option>
             </Select>
           </Form.Item>
           <Form.Item

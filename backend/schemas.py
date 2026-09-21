@@ -38,6 +38,15 @@ class UserBase(BaseModel):
             raise ValueError('EHR号必须为7位数字')
         return v
 
+    @validator('role')
+    def validate_role(cls, v):
+        if v is not None:
+            v_str = str(v).strip().lower()
+            if v_str not in {'admin', 'leader', 'user'}:
+                raise ValueError("角色必须为英文：admin（管理员）、leader（组长）或 user（普通用户）")
+            return v_str
+        return v
+
 
 class UserCreate(UserBase):
     # 【v5.1.1 新增需求】密码非必填，留空时后端使用默认密码 "Aa@1234567"
@@ -67,6 +76,15 @@ class UserUpdate(BaseModel):
     role: Optional[str] = None
     status: Optional[str] = None
     password: Optional[str] = None
+
+    @validator('role')
+    def validate_role(cls, v):
+        if v is not None:
+            v_str = str(v).strip().lower()
+            if v_str not in {'admin', 'leader', 'user'}:
+                raise ValueError("角色必须为英文：admin（管理员）、leader（组长）或 user（普通用户）")
+            return v_str
+        return v
 
     @field_validator('password')
     @classmethod

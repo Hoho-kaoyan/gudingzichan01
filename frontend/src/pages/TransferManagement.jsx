@@ -80,7 +80,7 @@ const TransferManagement = () => {
   const fetchAssets = async () => {
     if (!currentUser) return
     try {
-      const params = { status: '在用' }
+      const params = { status: '在用', limit: 10000 }
       const response = await api.get('/assets/', { params })
       setAssets(response.data)
     } catch (error) {

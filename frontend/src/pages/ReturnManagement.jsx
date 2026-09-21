@@ -60,7 +60,7 @@ const ReturnManagement = () => {
 
   const fetchAssets = async () => {
     try {
-      const response = await api.get('/assets/', { params: { status: '在用' } })
+      const response = await api.get('/assets/', { params: { status: '在用', limit: 10000 } })
       setAssets(response.data)
     } catch (error) {
       console.error('获取资产列表失败:', error)

@@ -84,7 +84,7 @@ const AssetManagement = () => {
   const fetchAssets = async (extraFilters) => {
     setLoading(true)
     try {
-      const params = { ...filters, ...(extraFilters || {}) }
+      const params = { ...filters, ...(extraFilters || {}), limit: 10000 }
       const response = await api.get('/assets/', { params })
       setAssets(response.data)
       if (isAdmin) {

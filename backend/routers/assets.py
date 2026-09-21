@@ -225,6 +225,9 @@ def _parse_row_data_for_resolve(row_data: dict, db: Session):
     if user_id is None:
         user_ehr = _get_rd(row_data, "使用人EHR号")
         if user_ehr:
+            # 兜底：Excel 数值格式单元格会丢前导零（0000003→3），纯数字不足7位时按7位补零
+            if user_ehr.isdigit() and len(user_ehr) < 7:
+                user_ehr = user_ehr.zfill(7)
             user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
             if user:
                 user_id = user.id
@@ -922,7 +925,7 @@ async def import_assets(
     try:
         # 读取Excel文件
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = pd.read_excel(io.BytesIO(contents), dtype=str)
         
         # 验证必需的列
         required_columns = ['资产编号', '所属大类', '实物名称']
@@ -1044,6 +1047,9 @@ async def import_assets(
                     if user_id is None:
                         user_ehr = row_cell_str(row, df.columns, '使用人EHR号')
                         if user_ehr:
+                            # 兜底：Excel 数值格式单元格会丢前导零（0000003→3），纯数字不足7位时按7位补零
+                            if user_ehr.isdigit() and len(user_ehr) < 7:
+                                user_ehr = user_ehr.zfill(7)
                             user = db.query(User).filter(User.ehr_number == user_ehr, User.deleted_at.is_(None)).first()
                             if user:
                                 user_id = user.id

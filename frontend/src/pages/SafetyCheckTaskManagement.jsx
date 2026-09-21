@@ -187,7 +187,7 @@ const SafetyCheckTaskManagement = () => {
 
   const fetchAssets = async (filters = {}) => {
     try {
-      const params = { ...filters, limit: 1000 }
+      const params = { ...filters, limit: 10000 }
       const response = await api.get('/assets/', { params })
       // 只显示有使用人的资产
       const assetsWithUsers = response.data.filter(asset => asset.user_id)

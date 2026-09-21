@@ -10,21 +10,23 @@ import pandas as pd
 def cell_to_str(cell: Any) -> str:
     """
     单元格 → 字符串。空/NaN → ''；整数浮点(如 123.0) → 无 .0 的字符串；否则 str(cell).strip()。
+    注意：字符串一律原样保留（不做数字规范化），否则 '0000001' 会被 float/int 转成 '1'，丢掉前导零。
     """
     if cell is None:
         return ""
     if getattr(cell, "__iter__", None) and not isinstance(cell, str) and pd.isna(cell):
         return ""
+    # 仅对数值类型（int/float，排除 bool 与 str）做 "123.0 → 123" 的规范化
+    if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+        try:
+            f = float(cell)
+            if f == int(f):
+                return str(int(f))
+        except (ValueError, TypeError, OverflowError):
+            pass
     s = str(cell).strip()
     if s.lower() == "nan" or not s:
         return ""
-    # 数字浮点写成 123.0 时，转为 "123"
-    try:
-        f = float(s)
-        if f == int(f):
-            return str(int(f))
-    except (ValueError, TypeError):
-        pass
     return s
 
 

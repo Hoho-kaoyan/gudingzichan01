@@ -666,7 +666,7 @@ async def import_users(
     try:
         # 读取Excel文件
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+        df = pd.read_excel(io.BytesIO(contents), dtype=str)
         
         # 验证必需的列
         required_columns = ['EHR号', '姓名', '组别']
@@ -706,6 +706,10 @@ async def import_users(
                 if not ehr_number or not real_name or not group:
                     raise ValueError("EHR号、姓名、组别均不能为空")
                 
+                # 兜底：Excel 数值格式单元格会丢前导零（0000001→1），纯数字不足7位时按7位补零
+                if ehr_number.isdigit() and len(ehr_number) < 7:
+                    ehr_number = ehr_number.zfill(7)
+
                 # 验证EHR号
                 if len(ehr_number) != 7 or not ehr_number.isdigit():
                     error_count += 1
